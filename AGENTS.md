@@ -1,0 +1,19 @@
+# AGENTS.md
+
+Rules for agents working in `opencord-clients`.
+
+- Use Node.js 26 through `fnm` before running package commands.
+- Use `pnpm` for installs, dependency updates, tests, and builds.
+- Prefer package-manager and generator commands over direct manifest edits.
+- Use TDD for behavior changes.
+- Keep the official clients Apache-2.0 licensed.
+- The official web client must be able to connect to any compatible OpenCord server URL.
+- Do not implement Phase 01 chat, media, meeting, or bot features in Phase 00.
+
+Before Node commands:
+
+```bash
+fnm use 26
+node --version
+pnpm --version
+```

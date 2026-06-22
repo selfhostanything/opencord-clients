@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OpenCord">
+  <rect width="64" height="64" rx="12" fill="#1f252b"/>
+  <path d="M19 22c0-5 4-9 9-9h8c5 0 9 4 9 9v20c0 5-4 9-9 9h-8c-5 0-9-4-9-9V22Z" fill="#2f8f83"/>
+  <path d="M27 25h10v14H27z" fill="#fff"/>
+  <path d="M25 43h14" stroke="#ffcf56" stroke-width="4" stroke-linecap="round"/>
+</svg>

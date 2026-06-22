@@ -1,0 +1,278 @@
+:root {
+  color: #172026;
+  background: #f5f7f8;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  background: #f5f7f8;
+}
+
+.server-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 12px;
+  background: #1f252b;
+  color: #f9fafb;
+}
+
+.server-mark,
+.server-dot {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+}
+
+.server-mark {
+  background: #2f8f83;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.server-dot {
+  background: #343c44;
+}
+
+.server-dot::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: #8ea0ad;
+}
+
+.server-dot.is-active::before {
+  background: #ffcf56;
+}
+
+.workspace {
+  min-width: 0;
+  padding: 28px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid #d7dee3;
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: #63727d;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.1;
+}
+
+.status-badge {
+  min-width: 154px;
+  padding: 10px 12px;
+  border: 1px solid #d7dee3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #34434e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.status-badge strong {
+  display: block;
+  margin-top: 3px;
+  color: #172026;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-badge.is-online {
+  border-color: #95d5bf;
+  background: #e9f8f0;
+}
+
+.status-badge.is-offline {
+  border-color: #efb2a1;
+  background: #fff0eb;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+  gap: 22px;
+  margin-top: 24px;
+}
+
+.connection-panel,
+.preview-panel {
+  border: 1px solid #d7dee3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.connection-panel {
+  padding: 20px;
+}
+
+.connection-panel label {
+  display: block;
+  margin-bottom: 8px;
+  color: #34434e;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.server-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.connection-panel input {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid #b8c5cc;
+  border-radius: 6px;
+  color: #172026;
+  background: #ffffff;
+}
+
+.connection-panel button {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #2f8f83;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.connection-panel p {
+  margin: 14px 0 0;
+  color: #63727d;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.preview-panel {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  min-height: 300px;
+  overflow: hidden;
+}
+
+.channel-list {
+  padding: 18px;
+  background: #e7ecef;
+  border-right: 1px solid #d7dee3;
+}
+
+.section-label {
+  margin-bottom: 12px;
+  color: #63727d;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.channel-row {
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: #34434e;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.channel-row.is-selected {
+  background: #ffffff;
+  color: #172026;
+}
+
+.message-pane {
+  padding: 24px;
+}
+
+.message-line {
+  max-width: 560px;
+  margin-bottom: 10px;
+  color: #34434e;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.message-line.strong {
+  color: #172026;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.message-line.muted {
+  color: #63727d;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .server-rail {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+
+  .workspace {
+    padding: 20px;
+  }
+
+  .topbar,
+  .content-grid,
+  .server-form-row,
+  .preview-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    display: grid;
+  }
+
+  .channel-list {
+    border-right: 0;
+    border-bottom: 1px solid #d7dee3;
+  }
+}
