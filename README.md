@@ -44,3 +44,8 @@ pnpm --filter web build
 
 The web shell defaults to `http://localhost:8080` and can add, switch, remove,
 and persist multiple compatible OpenCord server connections.
+
+Verified customer custom domains work as normal server URLs. For example, once
+`customer.example.com` resolves through the OpenCord ingress and the server
+custom-domain mapping is active, the official web, desktop, and mobile clients
+can connect to `https://customer.example.com`.
