@@ -1,5 +1,25 @@
 # OpenCord Desktop
 
-Electron desktop shell placeholder.
+Electron desktop shell for the OpenCord web renderer.
 
-Phase 00 reserves the app boundary only. Phase 02 owns the Electron runtime, native notifications, updates, and desktop-specific media integration.
+## Current Surface
+
+- Loads `apps/web/dist/index.html` by default.
+- Loads `OPENCORD_DESKTOP_RENDERER_URL` when running against a Vite dev server.
+- Uses secure renderer defaults: `contextIsolation`, `sandbox`, `webSecurity`, and no Node integration.
+- Exposes a narrow preload bridge as `window.openCordDesktop`.
+- Opens external navigation through the OS browser.
+
+## Development
+
+```bash
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter web build
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter desktop build
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter desktop start
+```
+
+Run the launch smoke check:
+
+```bash
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter desktop exec electron dist/main.js --smoke
+```
