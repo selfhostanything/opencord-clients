@@ -10,6 +10,7 @@ Electron desktop shell for the OpenCord web renderer.
 - Exposes a narrow preload bridge as `window.openCordDesktop`.
 - Provides `window.openCordDesktop.notifications.showMessage(...)` for validated native message notifications.
 - Opens external navigation through the OS browser.
+- Uses the web renderer's browser screen capture flow for screen sharing, preserving the secure preload boundary.
 
 ## Development
 

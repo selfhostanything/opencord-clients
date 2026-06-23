@@ -86,6 +86,12 @@ type VoiceState = {
   participants: VoiceParticipant[]
 }
 
+type ScreenShareState =
+  | { status: 'idle' }
+  | { status: 'starting' }
+  | { status: 'sharing'; stream: MediaStream }
+  | { status: 'error'; message: string }
+
 const initialSpaces: Space[] = [
   { id: 'opencord', name: 'OpenCord', initials: 'OC', unread: true, mentions: 2 },
   { id: 'platform', name: 'Platform', initials: 'PF', unread: false, mentions: 0 },
@@ -246,6 +252,7 @@ export default function App() {
   const [newChannelName, setNewChannelName] = useState('')
   const [editingMessage, setEditingMessage] = useState<{ id: string; body: string } | null>(null)
   const [voiceState, setVoiceState] = useState(initialVoiceState)
+  const [screenShareState, setScreenShareState] = useState<ScreenShareState>({ status: 'idle' })
 
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0]
   const visibleChannels = channels.filter((channel) => channel.spaceId === selectedSpace.id)
@@ -439,6 +446,13 @@ export default function App() {
   }
 
   function disconnectVoice() {
+    setScreenShareState((current) => {
+      if (current.status === 'sharing') {
+        stopScreenShareTracks(current.stream)
+      }
+
+      return { status: 'idle' }
+    })
     setVoiceState((current) => ({
       ...current,
       connectedChannelId: null,
@@ -464,6 +478,56 @@ export default function App() {
             : participant,
         ),
       }
+    })
+  }
+
+  async function startScreenShare() {
+    if (
+      !voiceState.connectedChannelId ||
+      screenShareState.status === 'starting' ||
+      screenShareState.status === 'sharing'
+    ) {
+      return
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setScreenShareState({ status: 'error', message: 'Screen share unavailable' })
+      return
+    }
+
+    setScreenShareState({ status: 'starting' })
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        audio: false,
+        video: true,
+      })
+      const [videoTrack] = stream.getVideoTracks()
+      if (!videoTrack) {
+        stopScreenShareTracks(stream)
+        setScreenShareState({ status: 'error', message: 'Screen share unavailable' })
+        return
+      }
+
+      videoTrack.addEventListener(
+        'ended',
+        () => {
+          setScreenShareState({ status: 'idle' })
+        },
+        { once: true },
+      )
+      setScreenShareState({ status: 'sharing', stream })
+    } catch (error) {
+      setScreenShareState({ status: 'error', message: screenShareErrorMessage(error) })
+    }
+  }
+
+  function stopScreenShare() {
+    setScreenShareState((current) => {
+      if (current.status === 'sharing') {
+        stopScreenShareTracks(current.stream)
+      }
+
+      return { status: 'idle' }
     })
   }
 
@@ -621,9 +685,12 @@ export default function App() {
         <VoiceControls
           channels={channels}
           voiceState={voiceState}
+          screenShareState={screenShareState}
           onToggleMute={toggleSelfMute}
           onToggleDeaf={toggleSelfDeaf}
           onDisconnect={disconnectVoice}
+          onStartScreenShare={startScreenShare}
+          onStopScreenShare={stopScreenShare}
         />
 
         <div className="user-footer">
@@ -917,21 +984,29 @@ function VoiceParticipantList({
 function VoiceControls({
   channels,
   voiceState,
+  screenShareState,
   onToggleMute,
   onToggleDeaf,
   onDisconnect,
+  onStartScreenShare,
+  onStopScreenShare,
 }: {
   channels: Channel[]
   voiceState: VoiceState
+  screenShareState: ScreenShareState
   onToggleMute: () => void
   onToggleDeaf: () => void
   onDisconnect: () => void
+  onStartScreenShare: () => void
+  onStopScreenShare: () => void
 }) {
   const activeChannel = channels.find((channel) => channel.id === voiceState.connectedChannelId)
   const isConnected = activeChannel?.kind === 'voice'
   const activeParticipants = isConnected
     ? voiceParticipantsForChannel(voiceState, activeChannel.id)
     : []
+  const screenShareButtonLabel =
+    screenShareState.status === 'sharing' ? 'Stop screen share' : 'Share screen'
 
   return (
     <section className="voice-controls" aria-label="Voice controls">
@@ -943,6 +1018,7 @@ function VoiceControls({
             {activeParticipants.map((participant) => participant.name).join(', ')}
           </span>
         ) : null}
+        <ScreenShareStatus state={screenShareState} />
       </div>
       <div className="voice-control-buttons">
         <button
@@ -963,6 +1039,20 @@ function VoiceControls({
         </button>
         <button
           type="button"
+          aria-label={screenShareButtonLabel}
+          disabled={!isConnected || screenShareState.status === 'starting'}
+          onClick={
+            screenShareState.status === 'sharing' ? onStopScreenShare : onStartScreenShare
+          }
+        >
+          {screenShareState.status === 'sharing'
+            ? 'Stop'
+            : screenShareState.status === 'starting'
+              ? 'Starting'
+              : 'Share'}
+        </button>
+        <button
+          type="button"
           aria-label="Disconnect voice"
           disabled={!isConnected}
           onClick={onDisconnect}
@@ -972,6 +1062,19 @@ function VoiceControls({
       </div>
     </section>
   )
+}
+
+function ScreenShareStatus({ state }: { state: ScreenShareState }) {
+  switch (state.status) {
+    case 'starting':
+      return <span className="voice-controls-share">Starting screen share</span>
+    case 'sharing':
+      return <span className="voice-controls-share">Screen sharing</span>
+    case 'error':
+      return <span className="voice-controls-error">{state.message}</span>
+    case 'idle':
+      return null
+  }
 }
 
 function AttachmentList({ attachments }: { attachments: MessageAttachment[] }) {
@@ -1047,6 +1150,18 @@ function voiceParticipantStatus(participant: VoiceParticipant, voiceState: Voice
   }
 
   return 'connected'
+}
+
+function stopScreenShareTracks(stream: MediaStream) {
+  stream.getTracks().forEach((track) => track.stop())
+}
+
+function screenShareErrorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === 'NotAllowedError') {
+    return 'Screen share blocked'
+  }
+
+  return 'Screen share failed'
 }
 
 function imagePreviewUrl(file: File) {

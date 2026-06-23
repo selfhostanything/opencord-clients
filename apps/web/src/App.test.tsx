@@ -168,6 +168,65 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByRole('button', { name: 'Join Voice: Standup' })).toBeInTheDocument()
   })
 
+  it('starts and stops a mocked screen share from the voice controls', async () => {
+    const stop = vi.fn()
+    const screenShare = stubScreenShare({
+      track: createScreenShareTrack({ stop }),
+    })
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop screen share' })).toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Screen sharing')
+    expect(screenShare.getDisplayMedia).toHaveBeenCalledWith({ audio: false, video: true })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stop screen share' }))
+
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Share screen' })).toBeInTheDocument()
+  })
+
+  it('shows a screen share failure when capture permission is denied', async () => {
+    stubScreenShare({
+      error: new DOMException('Permission denied', 'NotAllowedError'),
+    })
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Screen share blocked')
+    })
+    expect(screen.getByRole('button', { name: 'Share screen' })).toBeInTheDocument()
+  })
+
+  it('clears screen share state when the captured track ends externally', async () => {
+    let endedListener: (() => void) | undefined
+    stubScreenShare({
+      track: createScreenShareTrack({
+        onEnded(listener) {
+          endedListener = listener
+        },
+      }),
+    })
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop screen share' })).toBeInTheDocument()
+    })
+    endedListener?.()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Share screen' })).toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('Voice controls')).not.toHaveTextContent('Screen sharing')
+  })
+
   it('adds, switches, removes, and persists multiple server connections', async () => {
     render(<App />)
 
@@ -203,3 +262,47 @@ describe('OpenCord web chat UI', () => {
     )
   })
 })
+
+function stubScreenShare({
+  error,
+  track,
+}: {
+  error?: Error
+  track?: MediaStreamTrack
+}) {
+  const getDisplayMedia = vi.fn()
+  if (error) {
+    getDisplayMedia.mockRejectedValue(error)
+  } else {
+    const mediaTrack = track ?? createScreenShareTrack()
+    getDisplayMedia.mockResolvedValue({
+      getTracks: () => [mediaTrack],
+      getVideoTracks: () => [mediaTrack],
+    } as unknown as MediaStream)
+  }
+
+  Object.defineProperty(navigator, 'mediaDevices', {
+    configurable: true,
+    value: { getDisplayMedia },
+  })
+
+  return { getDisplayMedia }
+}
+
+function createScreenShareTrack({
+  onEnded,
+  stop = vi.fn(),
+}: {
+  onEnded?: (listener: () => void) => void
+  stop?: () => void
+} = {}) {
+  return {
+    addEventListener(event: string, listener: EventListenerOrEventListenerObject) {
+      if (event === 'ended' && typeof listener === 'function') {
+        onEnded?.(() => listener(new Event('ended')))
+      }
+    },
+    kind: 'video',
+    stop,
+  } as unknown as MediaStreamTrack
+}

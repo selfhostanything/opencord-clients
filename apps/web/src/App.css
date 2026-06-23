@@ -515,9 +515,17 @@ button {
   white-space: nowrap;
 }
 
+.voice-controls-status .voice-controls-share {
+  color: #86e0bb;
+}
+
+.voice-controls-status .voice-controls-error {
+  color: #ffb29e;
+}
+
 .voice-control-buttons {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
