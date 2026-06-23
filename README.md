@@ -1,5 +1,7 @@
 # OpenCord
 
+[![GitHub stars](https://img.shields.io/github/stars/selfhostanything/opencord?style=social)](https://github.com/selfhostanything/opencord/stargazers)
+
 OpenCord is a self-hostable, Discord-like workspace chat client for teams,
 communities, and organizations that want control over where their conversations
 live.
@@ -54,6 +56,10 @@ packages/*     Shared client packages
 ```
 
 Developer details live in [docs/development.md](docs/development.md).
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=selfhostanything/opencord&type=Date)](https://www.star-history.com/#selfhostanything/opencord&Date)
 
 ## License
 
