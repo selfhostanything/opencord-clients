@@ -411,6 +411,95 @@ describe('OpenCord API client', () => {
     })
   })
 
+  it('preserves rich message fields from the server payload', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        messages: [
+          {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc94',
+            organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+            space_id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+            channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+            author_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+            content: 'seeded rich message',
+            content_format: 'plain',
+            embeds: [
+              {
+                type: 'rich',
+                title: 'Seeded Embed',
+                description: 'Rendered by the official client',
+                color: 3726513,
+              },
+            ],
+            components: [
+              {
+                type: 1,
+                components: [{ type: 2, label: 'Acknowledge', custom_id: 'seed:ack' }],
+              },
+            ],
+            mention_user_ids: ['01973f83-f22a-73ba-ae76-5a045c52fc90'],
+            mention_role_ids: ['01973f83-f22a-73ba-ae76-5a045c52fc99'],
+            mention_everyone: true,
+            reply_to_message_id: '01973f83-f22a-73ba-ae76-5a045c52fc88',
+            webhook_username: 'Seed Hook',
+            webhook_avatar_url: 'https://chat.example.com/hook.png',
+            attachments: [
+              {
+                id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+                organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+                space_id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+                channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+                message_id: '01973f83-f22a-73ba-ae76-5a045c52fc94',
+                uploader_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+                file_name: 'local-alpha-readme.txt',
+                content_type: 'text/plain',
+                size_bytes: 87,
+                status: 'linked',
+                download_url:
+                  'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+              },
+            ],
+            created_at: '2026-06-24T00:03:00Z',
+            edited_at: null,
+            deleted_at: null,
+          },
+        ],
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    const [message] = await client.listMessages('01973f83-f22a-73ba-ae76-5a045c52fc93')
+
+    expect(message.spaceId).toBe('01973f83-f22a-73ba-ae76-5a045c52fc92')
+    expect(message.embeds).toEqual([
+      expect.objectContaining({
+        title: 'Seeded Embed',
+        description: 'Rendered by the official client',
+      }),
+    ])
+    expect(message.components).toHaveLength(1)
+    expect(message.mentionUserIds).toEqual(['01973f83-f22a-73ba-ae76-5a045c52fc90'])
+    expect(message.mentionRoleIds).toEqual(['01973f83-f22a-73ba-ae76-5a045c52fc99'])
+    expect(message.mentionEveryone).toBe(true)
+    expect(message.replyToMessageId).toBe('01973f83-f22a-73ba-ae76-5a045c52fc88')
+    expect(message.webhookUsername).toBe('Seed Hook')
+    expect(message.webhookAvatarUrl).toBe('https://chat.example.com/hook.png')
+    expect(message.attachments).toEqual([
+      expect.objectContaining({
+        fileName: 'local-alpha-readme.txt',
+        contentType: 'text/plain',
+        sizeBytes: 87,
+        downloadUrl:
+          'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+      }),
+    ])
+  })
+
   it('registers push tokens with bearer auth and maps masked responses', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(

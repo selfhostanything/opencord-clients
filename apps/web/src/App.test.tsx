@@ -10,6 +10,7 @@ describe('OpenCord web chat UI', () => {
   const fetchMock = vi.fn()
 
   beforeEach(() => {
+    fetchMock.mockReset()
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: 'ok', version: 'test-version' }),
@@ -132,6 +133,12 @@ describe('OpenCord web chat UI', () => {
           { status: 201 },
         )
       }
+      if (
+        url.endsWith('/organizations/01973f83-f22a-73ba-ae76-5a045c52fc91/meetings') &&
+        init?.method === undefined
+      ) {
+        return new Response(JSON.stringify({ meetings: [] }))
+      }
 
       throw new Error(`Unexpected fetch ${url}`)
     })
@@ -174,6 +181,263 @@ describe('OpenCord web chat UI', () => {
         method: 'POST',
       }),
     )
+  })
+
+  it('loads seeded rich messages, attachments, channels, and meetings from local alpha', async () => {
+    const organizationId = '019ef679-3158-7830-81f5-4b02336e9fa1'
+    const spaceId = '019ef679-3160-7813-b9aa-10795e7904d8'
+    const textChannelId = '019ef679-3166-7c33-9e32-2c8350a31729'
+    const voiceChannelId = '019ef679-3169-74e1-aedd-9365f9ff198d'
+    const ownerUserId = '019ef679-303f-72f2-83bd-4501222533f2'
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/healthz')) {
+        return new Response(JSON.stringify({ status: 'ok', version: 'test-version' }))
+      }
+      if (url.endsWith('/auth/register')) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: ownerUserId,
+              email: 'owner@opencord.local',
+              display_name: 'OpenCord Owner',
+            },
+            session: { token: 'seed-session-token' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/organizations') && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            organizations: [
+              {
+                id: organizationId,
+                name: 'OpenCord Local Alpha',
+                slug: 'opencord-local-alpha',
+                plan: 'free',
+                deployment_mode: 'self_hosted',
+                primary_region: 'local',
+                created_at: '2026-06-24T00:00:00Z',
+                role: 'owner',
+              },
+            ],
+          }),
+        )
+      }
+      if (
+        url.endsWith(`/organizations/${organizationId}/spaces`) &&
+        init?.method === undefined
+      ) {
+        return new Response(
+          JSON.stringify({
+            spaces: [
+              {
+                id: spaceId,
+                organization_id: organizationId,
+                name: 'Local Alpha',
+                slug: 'local-alpha',
+                created_at: '2026-06-24T00:01:00Z',
+                role: 'owner',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/spaces/${spaceId}/channels`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            channels: [
+              {
+                id: textChannelId,
+                organization_id: organizationId,
+                space_id: spaceId,
+                kind: 'text',
+                name: 'general',
+                slug: 'general',
+                topic: 'Local alpha chat, bot, webhook, and attachment smoke tests.',
+                position: 0,
+                is_private: false,
+                archived_at: null,
+                created_at: '2026-06-24T00:02:00Z',
+              },
+              {
+                id: voiceChannelId,
+                organization_id: organizationId,
+                space_id: spaceId,
+                kind: 'voice',
+                name: 'Voice Lounge',
+                slug: 'voice-lounge',
+                topic: 'Local alpha voice and screen-share smoke tests.',
+                position: 0,
+                is_private: false,
+                archived_at: null,
+                created_at: '2026-06-24T00:02:00Z',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/channels/${textChannelId}/messages`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              {
+                id: '019ef679-316c-7d82-a9d8-a9ed23811d2d',
+                organization_id: organizationId,
+                space_id: spaceId,
+                channel_id: textChannelId,
+                author_user_id: ownerUserId,
+                content: 'Welcome to the OpenCord local alpha workspace.',
+                content_format: 'plain',
+                embeds: [],
+                components: [],
+                reply_to_message_id: null,
+                attachments: [],
+                created_at: '2026-06-24T00:03:00Z',
+                edited_at: null,
+                deleted_at: null,
+              },
+              {
+                id: '019ef679-316f-70c1-ae0d-2efbe0b99457',
+                organization_id: organizationId,
+                space_id: spaceId,
+                channel_id: textChannelId,
+                author_user_id: ownerUserId,
+                content: 'Local alpha rich message fixture.',
+                content_format: 'plain',
+                embeds: [
+                  {
+                    type: 'rich',
+                    title: 'OpenCord Local Alpha',
+                    description: 'Fixture for rich message rendering.',
+                    color: 3726513,
+                    fields: [
+                      {
+                        name: 'Surface',
+                        value: 'embeds, mentions, replies, and components',
+                        inline: true,
+                      },
+                    ],
+                    footer: { text: 'Phase 09' },
+                  },
+                ],
+                components: [{ type: 1, components: [] }],
+                mention_user_ids: [ownerUserId],
+                mention_role_ids: [],
+                mention_everyone: true,
+                reply_to_message_id: '019ef679-316c-7d82-a9d8-a9ed23811d2d',
+                attachments: [],
+                created_at: '2026-06-24T00:04:00Z',
+                edited_at: null,
+                deleted_at: null,
+              },
+              {
+                id: '019ef679-3172-7b61-a82d-d3b68d5c68b7',
+                organization_id: organizationId,
+                space_id: spaceId,
+                channel_id: textChannelId,
+                author_user_id: ownerUserId,
+                content: 'Local alpha attachment fixture.',
+                content_format: 'plain',
+                embeds: [],
+                components: [],
+                reply_to_message_id: null,
+                attachments: [
+                  {
+                    id: '019ef679-3175-7cd2-ba44-4cc2481dfab1',
+                    organization_id: organizationId,
+                    space_id: spaceId,
+                    channel_id: textChannelId,
+                    message_id: '019ef679-3172-7b61-a82d-d3b68d5c68b7',
+                    uploader_user_id: ownerUserId,
+                    file_name: 'local-alpha-readme.txt',
+                    content_type: 'text/plain',
+                    size_bytes: 87,
+                    status: 'linked',
+                    download_url:
+                      'http://localhost:8080/attachments/019ef679-3175-7cd2-ba44-4cc2481dfab1/content',
+                  },
+                ],
+                created_at: '2026-06-24T00:05:00Z',
+                edited_at: null,
+                deleted_at: null,
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/organizations/${organizationId}/meetings`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            meetings: [
+              {
+                id: '019ef679-3187-7331-a2bd-aa8b5ade1e57',
+                organization_id: organizationId,
+                space_id: spaceId,
+                channel_id: textChannelId,
+                created_by_user_id: ownerUserId,
+                title: 'OpenCord Local Alpha Standup',
+                description: 'Local alpha meeting fixture.',
+                status: 'scheduled',
+                starts_at: '2099-01-09T09:00:00Z',
+                ends_at: '2099-01-09T09:30:00Z',
+                timezone: 'UTC',
+                join_slug: 'mtg-019ef67931877331a2bdaa8b5ade1e57',
+                join_url:
+                  'http://localhost:8080/join/mtg-019ef67931877331a2bdaa8b5ade1e57',
+                cancelled_at: null,
+                attendees: [],
+                reminders: [],
+              },
+            ],
+          }),
+        )
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+
+    await userEvent.clear(screen.getByLabelText('Local alpha email'))
+    await userEvent.type(screen.getByLabelText('Local alpha email'), 'owner@opencord.local')
+    await userEvent.clear(screen.getByLabelText('Local alpha display name'))
+    await userEvent.type(screen.getByLabelText('Local alpha display name'), 'OpenCord Owner')
+    await userEvent.type(screen.getByLabelText('Local alpha password'), 'correct horse battery staple')
+    await userEvent.click(screen.getByRole('button', { name: 'Start local alpha' }))
+
+    const timeline = await screen.findByLabelText('Message timeline')
+    expect(timeline).toHaveTextContent('Welcome to the OpenCord local alpha workspace.')
+    expect(timeline).toHaveTextContent('Local alpha rich message fixture.')
+    expect(timeline).toHaveTextContent('Local alpha attachment fixture.')
+    expect(
+      within(timeline).getByRole('article', { name: 'Rich embed: OpenCord Local Alpha' }),
+    ).toHaveTextContent('Fixture for rich message rendering.')
+    expect(timeline).toHaveTextContent('local-alpha-readme.txt')
+    expect(timeline).toHaveTextContent('text/plain')
+    expect(timeline).toHaveTextContent('87 B')
+    expect(screen.getByRole('button', { name: 'Join Voice: Voice Lounge' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+
+    const upcomingMeetings = screen.getByLabelText('Upcoming meetings')
+    expect(upcomingMeetings).toHaveTextContent('OpenCord Local Alpha Standup')
+    expect(upcomingMeetings).toHaveTextContent(
+      'http://localhost:8080/join/mtg-019ef67931877331a2bdaa8b5ade1e57',
+    )
+    expect(
+      fetchMock.mock.calls.some(([url, init]) => {
+        const request = init as RequestInit | undefined
+        const headers = request?.headers as Record<string, string> | undefined
+        return (
+          String(url) === 'http://localhost:8080/organizations' &&
+          request?.method === 'POST' &&
+          headers?.Authorization === 'Bearer seed-session-token'
+        )
+      }),
+    ).toBe(false)
   })
 
   it('renders typed workspace routes for channel, calendar, developer, and meeting surfaces', async () => {

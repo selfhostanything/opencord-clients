@@ -143,14 +143,38 @@ export type UpdateMessageRequest = {
 export type Message = {
   id: string
   organizationId: string
+  spaceId: string | null
   channelId: string
   authorUserId: string
   content: string
   contentFormat: string
+  embeds: Record<string, unknown>[]
+  components: Record<string, unknown>[]
+  webhookUsername: string | null
+  webhookAvatarUrl: string | null
+  replyToMessageId: string | null
+  mentionUserIds: string[]
+  mentionRoleIds: string[]
+  mentionEveryone: boolean
   attachmentIds: string[]
+  attachments: MessageAttachment[]
   createdAt: string
   editedAt: string | null
   deletedAt: string | null
+}
+
+export type MessageAttachment = {
+  id: string
+  organizationId: string
+  spaceId: string
+  channelId: string
+  messageId: string | null
+  uploaderUserId: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  status: string
+  downloadUrl: string
 }
 
 export type CreateMeetingRequest = {
@@ -490,14 +514,38 @@ type ChannelListPayload = {
 type MessagePayload = {
   id?: unknown
   organization_id?: unknown
+  space_id?: unknown
   channel_id?: unknown
   author_user_id?: unknown
   content?: unknown
   content_format?: unknown
+  embeds?: unknown
+  components?: unknown
+  webhook_username?: unknown
+  webhook_avatar_url?: unknown
+  reply_to_message_id?: unknown
+  mention_user_ids?: unknown
+  mention_role_ids?: unknown
+  mention_everyone?: unknown
   attachment_ids?: unknown
+  attachments?: unknown
   created_at?: unknown
   edited_at?: unknown
   deleted_at?: unknown
+}
+
+type MessageAttachmentPayload = {
+  id?: unknown
+  organization_id?: unknown
+  space_id?: unknown
+  channel_id?: unknown
+  message_id?: unknown
+  uploader_user_id?: unknown
+  file_name?: unknown
+  content_type?: unknown
+  size_bytes?: unknown
+  status?: unknown
+  download_url?: unknown
 }
 
 type MessageResourcePayload = {
@@ -1541,20 +1589,52 @@ function channelFromPayload(value: unknown): Channel {
 
 function messageFromPayload(value: unknown): Message {
   const payload = objectValue(value) as MessagePayload
+  const attachments = arrayValue(payload.attachments).map(messageAttachmentFromPayload)
 
   return {
     id: stringValue(payload.id, ''),
     organizationId: stringValue(payload.organization_id, ''),
+    spaceId: nullableStringValue(payload.space_id),
     channelId: stringValue(payload.channel_id, ''),
     authorUserId: stringValue(payload.author_user_id, ''),
     content: stringValue(payload.content, ''),
     contentFormat: stringValue(payload.content_format, 'plain'),
-    attachmentIds: arrayValue(payload.attachment_ids).filter(
-      (attachmentId): attachmentId is string => typeof attachmentId === 'string',
+    embeds: objectArrayValue(payload.embeds),
+    components: objectArrayValue(payload.components),
+    webhookUsername: nullableStringValue(payload.webhook_username),
+    webhookAvatarUrl: nullableStringValue(payload.webhook_avatar_url),
+    replyToMessageId: nullableStringValue(payload.reply_to_message_id),
+    mentionUserIds: stringArrayValue(payload.mention_user_ids),
+    mentionRoleIds: stringArrayValue(payload.mention_role_ids),
+    mentionEveryone: booleanValue(payload.mention_everyone, false),
+    attachmentIds: Array.from(
+      new Set([
+        ...stringArrayValue(payload.attachment_ids),
+        ...attachments.map((attachment) => attachment.id),
+      ]),
     ),
+    attachments,
     createdAt: stringValue(payload.created_at, ''),
     editedAt: nullableStringValue(payload.edited_at),
     deletedAt: nullableStringValue(payload.deleted_at),
+  }
+}
+
+function messageAttachmentFromPayload(value: unknown): MessageAttachment {
+  const payload = objectValue(value) as MessageAttachmentPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    spaceId: stringValue(payload.space_id, ''),
+    channelId: stringValue(payload.channel_id, ''),
+    messageId: nullableStringValue(payload.message_id),
+    uploaderUserId: stringValue(payload.uploader_user_id, ''),
+    fileName: stringValue(payload.file_name, ''),
+    contentType: stringValue(payload.content_type, 'application/octet-stream'),
+    sizeBytes: numberValue(payload.size_bytes, 0),
+    status: stringValue(payload.status, ''),
+    downloadUrl: stringValue(payload.download_url, ''),
   }
 }
 
@@ -1617,6 +1697,16 @@ function oidcProviderFromPayload(value: unknown): OidcProvider {
 
 function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
+}
+
+function stringArrayValue(value: unknown): string[] {
+  return arrayValue(value).filter((item): item is string => typeof item === 'string')
+}
+
+function objectArrayValue(value: unknown): Record<string, unknown>[] {
+  return arrayValue(value).filter(
+    (item): item is Record<string, unknown> => typeof item === 'object' && item !== null,
+  )
 }
 
 function numberValue(value: unknown, fallback: number) {

@@ -56,6 +56,7 @@ Run the server stack first from the sibling `opencord-server` checkout:
 ```bash
 make dev-deps
 make migrate
+make seed
 make dev-api
 make dev-realtime
 make dev-worker
@@ -72,9 +73,25 @@ pnpm --filter web test:e2e
 ```
 
 The Playwright e2e test uses the real local API at `http://localhost:8080`.
-It creates a unique local-alpha user/workspace per run and sends a
-server-backed message through the web UI. Keep `tests/e2e` under Playwright;
-Vitest excludes that folder so unit and browser suites do not mix.
+It creates a unique local-alpha user/workspace for chat send/edit/delete and
+uses the seeded owner workspace for rich messages, attachments, voice channel
+visibility, bot/webhook messages, meeting UI, authenticated ICS output, and raw
+browser WebSocket reconnect. Keep `tests/e2e` under Playwright; Vitest excludes
+that folder so unit and browser suites do not mix.
+
+## Desktop
+
+Build the web renderer and Electron shell before launch smoke:
+
+```bash
+pnpm --filter web build
+pnpm --filter desktop test
+pnpm --filter desktop build
+pnpm --filter desktop exec electron dist/main.js --smoke
+```
+
+The smoke command exits after the renderer loads and prints
+`opencord-desktop-ready`.
 
 ## Mobile And Android
 
@@ -102,6 +119,7 @@ export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
 emulator -list-avds
 emulator -avd <your-avd-name> -no-snapshot-save -no-audio -no-boot-anim
+# Headless CI/local smoke can also add: -no-window
 adb wait-for-device
 adb shell getprop ro.build.version.release
 pnpm --filter mobile start
@@ -110,6 +128,9 @@ pnpm --filter mobile android
 
 The Android emulator reaches the host OpenCord API through
 `http://10.0.2.2:8080`; do not use `localhost` inside the emulator.
+The Phase 09 local smoke verified Android 15, installed `com.opencord`,
+rendered the login screen with `http://10.0.2.2:8080`, and reached the
+`Channels` screen after entering a local email.
 
 Verified customer custom domains work as normal server URLs. For example, once
 `customer.example.com` resolves through the OpenCord ingress and the server

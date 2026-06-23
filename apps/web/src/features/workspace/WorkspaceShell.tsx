@@ -539,14 +539,18 @@ export function WorkspaceShell({
         sessionToken: authResult.session.token,
       })
       const workspace = await ensureLocalAlphaWorkspace(client, authResult.user)
-      const loadedMessages = await client.listMessages(workspace.channel.id)
+      const [loadedMessages, loadedMeetings] = await Promise.all([
+        client.listMessages(workspace.channel.id),
+        client.listMeetings(workspace.organization.id),
+      ])
 
       setLocalAlphaUser(authResult.user)
       setLocalAlphaSessionToken(authResult.session.token)
       setLocalAlphaOrganization(workspace.organization)
       setSpaces([spaceFromApi(workspace.space)])
-      setChannels([channelFromApi(workspace.channel)])
+      setChannels(workspace.channels.map(channelFromApi))
       setMessages(loadedMessages.map((message) => chatMessageFromApi(message, authResult.user)))
+      setMeetings(loadedMeetings.map(calendarMeetingFromApi))
       setSelectedSpaceId(workspace.space.id)
       setSelectedChannelId(workspace.channel.id)
       setDeveloperSessionToken(authResult.session.token)
@@ -595,15 +599,24 @@ export function WorkspaceShell({
       (await client.createSpace(organization.id, { name: `${workspaceName} Space` })).space
 
     const existingChannels = await client.listChannels(space.id)
+    const channels =
+      existingChannels.length > 0
+        ? existingChannels
+        : [
+            await client.createChannel(space.id, {
+              name: 'general',
+              topic: 'Local alpha chat',
+            }),
+          ]
     const channel =
-      existingChannels.find((candidate) => candidate.kind === 'text') ??
-      existingChannels[0] ??
+      channels.find((candidate) => candidate.kind === 'text') ??
+      channels[0] ??
       (await client.createChannel(space.id, {
         name: 'general',
         topic: 'Local alpha chat',
       }))
 
-    return { organization, space, channel }
+    return { organization, space, channel, channels }
   }
 
   useEffect(() => {
@@ -2856,11 +2869,12 @@ function channelFromApi(channel: ApiChannel): Channel {
 function chatMessageFromApi(message: ApiMessage, user: AuthUser | null): ChatMessage {
   const own = Boolean(user?.id && user.id === message.authorUserId)
   const timestamp = message.createdAt ? new Date(message.createdAt) : null
+  const author = message.webhookUsername ?? (own ? 'You' : shortId(message.authorUserId))
 
   return {
     id: message.id,
     channelId: message.channelId,
-    author: own ? 'You' : shortId(message.authorUserId),
+    author,
     role: 'Member',
     time:
       timestamp && !Number.isNaN(timestamp.getTime())
@@ -2868,8 +2882,16 @@ function chatMessageFromApi(message: ApiMessage, user: AuthUser | null): ChatMes
         : 'now',
     body: message.content,
     own,
-    embeds: [],
-    attachments: [],
+    embeds: message.embeds as RichEmbed[],
+    attachments: message.attachments.map((attachment) => ({
+      id: attachment.id,
+      fileName: attachment.fileName,
+      contentType: attachment.contentType,
+      sizeBytes: attachment.sizeBytes,
+      previewUrl: attachment.contentType.startsWith('image/')
+        ? attachment.downloadUrl || undefined
+        : undefined,
+    })),
     edited: Boolean(message.editedAt),
   }
 }

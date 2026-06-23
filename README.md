@@ -45,6 +45,9 @@ pnpm --filter web dev
 ```
 
 The web client defaults to `http://localhost:8080` for local development.
+For local alpha dogfood, run `make seed` in the sibling `opencord-server`
+checkout, then sign in with `owner@opencord.local` and password
+`correct horse battery staple`.
 
 ## Repository
 
