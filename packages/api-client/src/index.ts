@@ -152,6 +152,28 @@ export type Meeting = {
   reminders: MeetingReminder[]
 }
 
+export type CommandInteractionOption = Record<string, unknown>
+
+export type CreateCommandInteractionRequest = {
+  commandId: string
+  options?: CommandInteractionOption[]
+}
+
+export type CommandInteraction = {
+  id: string
+  applicationId: string
+  spaceId: string
+  channelId: string
+  commandId: string
+  invokingUserId: string
+  token: string
+  tokenLastFour: string
+  status: string
+  options: CommandInteractionOption[]
+  createdAt: string
+  respondedAt: string | null
+}
+
 export type OpenCordApiClientOptions = {
   baseUrl?: string
   fetch?: OpenCordFetch
@@ -298,6 +320,25 @@ type MeetingPayload = {
 
 type MeetingResourcePayload = {
   meeting?: unknown
+}
+
+type CommandInteractionPayload = {
+  id?: unknown
+  application_id?: unknown
+  space_id?: unknown
+  channel_id?: unknown
+  command_id?: unknown
+  invoking_user_id?: unknown
+  token?: unknown
+  token_last_four?: unknown
+  status?: unknown
+  options?: unknown
+  created_at?: unknown
+  responded_at?: unknown
+}
+
+type CommandInteractionResourcePayload = {
+  interaction?: unknown
 }
 
 type ErrorPayload = {
@@ -464,6 +505,24 @@ export class OpenCordApiClient {
     }
   }
 
+  async createCommandInteraction(
+    channelId: string,
+    request: CreateCommandInteractionRequest,
+  ): Promise<CommandInteraction> {
+    const payload = await this.requestJson<CommandInteractionResourcePayload>(
+      `/channels/${encodeURIComponent(channelId)}/command-interactions`,
+      {
+        body: JSON.stringify({
+          command_id: request.commandId,
+          options: request.options ?? [],
+        }),
+        method: 'POST',
+      },
+    )
+
+    return commandInteractionFromPayload(payload.interaction)
+  }
+
   async resolveMeetingJoinUrl(joinSlug: string): Promise<Meeting> {
     const payload = await this.requestJson<MeetingResourcePayload>(
       `/join/${encodeURIComponent(joinSlug)}`,
@@ -591,6 +650,25 @@ function voiceParticipantFromPayload(value: unknown): VoiceParticipant {
     userId: stringValue(payload.user_id, ''),
     selfMute: booleanValue(payload.self_mute, false),
     selfDeaf: booleanValue(payload.self_deaf, false),
+  }
+}
+
+function commandInteractionFromPayload(value: unknown): CommandInteraction {
+  const payload = objectValue(value) as CommandInteractionPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    applicationId: stringValue(payload.application_id, ''),
+    spaceId: stringValue(payload.space_id, ''),
+    channelId: stringValue(payload.channel_id, ''),
+    commandId: stringValue(payload.command_id, ''),
+    invokingUserId: stringValue(payload.invoking_user_id, ''),
+    token: stringValue(payload.token, ''),
+    tokenLastFour: stringValue(payload.token_last_four, ''),
+    status: stringValue(payload.status, 'pending'),
+    options: arrayValue(payload.options).map(objectValue),
+    createdAt: stringValue(payload.created_at, ''),
+    respondedAt: nullableStringValue(payload.responded_at),
   }
 }
 

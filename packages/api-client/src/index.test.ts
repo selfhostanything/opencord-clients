@@ -389,6 +389,68 @@ describe('OpenCord API client', () => {
     )
   })
 
+  it('creates a channel command interaction with bearer auth', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        interaction: {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fca4',
+          application_id: '01973f83-f22a-73ba-ae76-5a045c52fca5',
+          space_id: '01973f83-f22a-73ba-ae76-5a045c52fca6',
+          channel_id: '01973f83-f22a-73ba-ae76-5a045c52fca7',
+          command_id: '01973f83-f22a-73ba-ae76-5a045c52fca8',
+          invoking_user_id: '01973f83-f22a-73ba-ae76-5a045c52fca9',
+          token: 'oci_shown_once',
+          token_last_four: 'once',
+          status: 'pending',
+          options: [{ name: 'version', value: '1.2.3' }],
+          created_at: '2026-06-23T09:00:00.000Z',
+          responded_at: null,
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.createCommandInteraction('01973f83-f22a-73ba-ae76-5a045c52fca7', {
+        commandId: '01973f83-f22a-73ba-ae76-5a045c52fca8',
+        options: [{ name: 'version', value: '1.2.3' }],
+      }),
+    ).resolves.toEqual({
+      id: '01973f83-f22a-73ba-ae76-5a045c52fca4',
+      applicationId: '01973f83-f22a-73ba-ae76-5a045c52fca5',
+      spaceId: '01973f83-f22a-73ba-ae76-5a045c52fca6',
+      channelId: '01973f83-f22a-73ba-ae76-5a045c52fca7',
+      commandId: '01973f83-f22a-73ba-ae76-5a045c52fca8',
+      invokingUserId: '01973f83-f22a-73ba-ae76-5a045c52fca9',
+      token: 'oci_shown_once',
+      tokenLastFour: 'once',
+      status: 'pending',
+      options: [{ name: 'version', value: '1.2.3' }],
+      createdAt: '2026-06-23T09:00:00.000Z',
+      respondedAt: null,
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://chat.example.com/channels/01973f83-f22a-73ba-ae76-5a045c52fca7/command-interactions',
+      {
+        body: JSON.stringify({
+          command_id: '01973f83-f22a-73ba-ae76-5a045c52fca8',
+          options: [{ name: 'version', value: '1.2.3' }],
+        }),
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      },
+    )
+  })
+
   it('resolves meeting join URLs through the typed API', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(
