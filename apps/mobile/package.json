@@ -1,0 +1,29 @@
+{
+  "type": "module",
+  "name": "mobile",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "private": true,
+  "dependencies": {
+    "@opencord/api-client": "workspace:*",
+    "@opencord/realtime": "workspace:*",
+    "expo": "^56.0.12",
+    "react": "^19.2.7",
+    "react-native": "^0.86.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

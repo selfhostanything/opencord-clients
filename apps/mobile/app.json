@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "OpenCord",
+    "slug": "opencord-mobile",
+    "scheme": "opencord",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "platforms": ["ios", "android"]
+  }
+}
