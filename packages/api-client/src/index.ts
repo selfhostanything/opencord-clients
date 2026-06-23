@@ -79,6 +79,12 @@ export type BotApplicationCreated = {
   botToken: BotToken
 }
 
+export type BotApplicationDetail = {
+  botApplication: BotApplication
+  activeTokenLastFour: string | null
+  spaceMemberships: SpaceMember[]
+}
+
 export type InviteBotToSpaceRequest = {
   role?: 'member' | 'guest'
 }
@@ -291,6 +297,16 @@ type BotTokenPayload = {
 type BotApplicationCreatedPayload = {
   bot_application?: unknown
   bot_token?: unknown
+}
+
+type BotApplicationDetailPayload = {
+  bot_application?: unknown
+  active_token_last_four?: unknown
+  space_memberships?: unknown
+}
+
+type BotApplicationListPayload = {
+  bot_applications?: unknown
 }
 
 type BotTokenResourcePayload = {
@@ -622,6 +638,27 @@ export class OpenCordApiClient {
     return botApplicationCreatedFromPayload(payload)
   }
 
+  async listBotApplications(organizationId: string): Promise<BotApplicationDetail[]> {
+    const payload = await this.requestJson<BotApplicationListPayload>(
+      `/organizations/${encodeURIComponent(organizationId)}/bot-applications`,
+    )
+
+    return arrayValue(payload.bot_applications).map(botApplicationDetailFromPayload)
+  }
+
+  async getBotApplication(
+    organizationId: string,
+    applicationId: string,
+  ): Promise<BotApplicationDetail> {
+    const payload = await this.requestJson<BotApplicationDetailPayload>(
+      `/organizations/${encodeURIComponent(
+        organizationId,
+      )}/bot-applications/${encodeURIComponent(applicationId)}`,
+    )
+
+    return botApplicationDetailFromPayload(payload)
+  }
+
   async rotateBotToken(organizationId: string, applicationId: string): Promise<BotToken> {
     const payload = await this.requestJson<BotTokenResourcePayload>(
       `/organizations/${encodeURIComponent(
@@ -811,6 +848,16 @@ function botApplicationCreatedFromPayload(value: BotApplicationCreatedPayload): 
   return {
     botApplication: botApplicationFromPayload(value.bot_application),
     botToken: botTokenFromPayload(value.bot_token),
+  }
+}
+
+function botApplicationDetailFromPayload(value: unknown): BotApplicationDetail {
+  const payload = objectValue(value) as BotApplicationDetailPayload
+
+  return {
+    botApplication: botApplicationFromPayload(payload.bot_application),
+    activeTokenLastFour: nullableStringValue(payload.active_token_last_four),
+    spaceMemberships: arrayValue(payload.space_memberships).map(spaceMemberFromPayload),
   }
 }
 

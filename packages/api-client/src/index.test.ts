@@ -616,6 +616,93 @@ describe('OpenCord API client', () => {
     )
   })
 
+  it('lists and gets bot application details without raw tokens', async () => {
+    const botDetailPayload = {
+      bot_application: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fcd1',
+        organization_id: '01973f83-f22a-73ba-ae76-5a045c52fcd2',
+        bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fcd3',
+        created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fcd4',
+        name: 'Deploy Bot',
+        description: 'Posts release status',
+        status: 'active',
+      },
+      active_token_last_four: 'last',
+      space_memberships: [
+        {
+          space_id: '01973f83-f22a-73ba-ae76-5a045c52fcd5',
+          user_id: '01973f83-f22a-73ba-ae76-5a045c52fcd3',
+          role: 'member',
+          status: 'active',
+        },
+      ],
+    }
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          bot_applications: [botDetailPayload],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(botDetailPayload))
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    const expected = {
+      botApplication: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fcd1',
+        organizationId: '01973f83-f22a-73ba-ae76-5a045c52fcd2',
+        botUserId: '01973f83-f22a-73ba-ae76-5a045c52fcd3',
+        createdByUserId: '01973f83-f22a-73ba-ae76-5a045c52fcd4',
+        name: 'Deploy Bot',
+        description: 'Posts release status',
+        status: 'active',
+      },
+      activeTokenLastFour: 'last',
+      spaceMemberships: [
+        {
+          spaceId: '01973f83-f22a-73ba-ae76-5a045c52fcd5',
+          userId: '01973f83-f22a-73ba-ae76-5a045c52fcd3',
+          role: 'member',
+          status: 'active',
+        },
+      ],
+    }
+
+    await expect(
+      client.listBotApplications('01973f83-f22a-73ba-ae76-5a045c52fcd2'),
+    ).resolves.toEqual([expected])
+    await expect(
+      client.getBotApplication(
+        '01973f83-f22a-73ba-ae76-5a045c52fcd2',
+        '01973f83-f22a-73ba-ae76-5a045c52fcd1',
+      ),
+    ).resolves.toEqual(expected)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://chat.example.com/organizations/01973f83-f22a-73ba-ae76-5a045c52fcd2/bot-applications',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://chat.example.com/organizations/01973f83-f22a-73ba-ae76-5a045c52fcd2/bot-applications/01973f83-f22a-73ba-ae76-5a045c52fcd1',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+      },
+    )
+  })
+
   it('resolves meeting join URLs through the typed API', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(

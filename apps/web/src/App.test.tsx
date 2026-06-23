@@ -345,6 +345,78 @@ describe('OpenCord web chat UI', () => {
     })
   })
 
+  it('loads existing server bot applications into developer settings', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/healthz')) {
+        return {
+          ok: true,
+          json: async () => ({ status: 'ok', version: 'test-version' }),
+        }
+      }
+
+      if (url.endsWith('/organizations/01973f83-f22a-73ba-ae76-5a045c52fc96/bot-applications')) {
+        expect(init).toMatchObject({
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        expect(init?.method).toBeUndefined()
+        return {
+          ok: true,
+          json: async () => ({
+            bot_applications: [
+              {
+                bot_application: {
+                  id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+                  organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+                  bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+                  created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc99',
+                  name: 'Loaded Bot',
+                  description: null,
+                  status: 'active',
+                },
+                active_token_last_four: 'last',
+                space_memberships: [
+                  {
+                    space_id: '01973f83-f22a-73ba-ae76-5a045c52fca2',
+                    user_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+                    role: 'member',
+                    status: 'active',
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Developer' }))
+
+    const developerSettings = screen.getByRole('region', { name: 'Developer settings' })
+    await userEvent.type(within(developerSettings).getByLabelText('Session token'), 'session-token')
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Organization ID'),
+      '01973f83-f22a-73ba-ae76-5a045c52fc96',
+    )
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Space ID'),
+      '01973f83-f22a-73ba-ae76-5a045c52fca2',
+    )
+    await userEvent.click(within(developerSettings).getByRole('button', { name: 'Load server bots' }))
+
+    await waitFor(() => {
+      expect(developerSettings).toHaveTextContent('Loaded Bot')
+    })
+    expect(developerSettings).toHaveTextContent('No description')
+    expect(developerSettings).toHaveTextContent('Hidden after creation - last 4 last')
+    expect(developerSettings).toHaveTextContent('Invited to OpenCord')
+  })
+
   it('opens and leaves a meeting room from the calendar', async () => {
     render(<App />)
 

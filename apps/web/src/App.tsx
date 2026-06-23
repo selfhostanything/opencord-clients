@@ -493,6 +493,33 @@ export default function App() {
     setNewBotDescription('')
   }
 
+  async function loadDeveloperBotsFromServer() {
+    setDeveloperError(null)
+    const context = developerApiContext()
+    if (!context) {
+      setDeveloperError('Session token and organization ID are required')
+      return
+    }
+
+    try {
+      const details = await context.client.listBotApplications(context.organizationId)
+      setDeveloperBots(
+        details.map((detail) => ({
+          id: detail.botApplication.id,
+          organizationId: detail.botApplication.organizationId,
+          botUserId: detail.botApplication.botUserId,
+          name: detail.botApplication.name,
+          description: detail.botApplication.description || 'No description',
+          token: hiddenBotTokenLabel(detail.activeTokenLastFour),
+          invitedSpaceIds: detail.spaceMemberships.map((membership) => membership.spaceId),
+          serverManaged: true,
+        })),
+      )
+    } catch (error) {
+      setDeveloperError(error instanceof Error ? error.message : 'Unable to load bots')
+    }
+  }
+
   async function rotateDeveloperBotToken(botId: string) {
     setDeveloperError(null)
     const bot = developerBots.find((candidate) => candidate.id === botId)
@@ -1075,6 +1102,7 @@ export default function App() {
             selectedSpace={selectedSpace}
             onCreateBot={createDeveloperBot}
             onInviteBot={inviteDeveloperBotToCurrentSpace}
+            onLoadBots={loadDeveloperBotsFromServer}
             onDeveloperOrganizationIdChange={setDeveloperOrganizationId}
             onDeveloperSessionTokenChange={setDeveloperSessionToken}
             onDeveloperSpaceIdChange={setDeveloperSpaceId}
@@ -1271,6 +1299,7 @@ function DeveloperSettingsPanel({
   onDeveloperSessionTokenChange,
   onDeveloperSpaceIdChange,
   onInviteBot,
+  onLoadBots,
   onNewBotDescriptionChange,
   onNewBotNameChange,
   onRotateToken,
@@ -1289,6 +1318,7 @@ function DeveloperSettingsPanel({
   onDeveloperSessionTokenChange: (value: string) => void
   onDeveloperSpaceIdChange: (value: string) => void
   onInviteBot: (botId: string) => void | Promise<void>
+  onLoadBots: () => void | Promise<void>
   onNewBotDescriptionChange: (value: string) => void
   onNewBotNameChange: (value: string) => void
   onRotateToken: (botId: string) => void | Promise<void>
@@ -1306,6 +1336,9 @@ function DeveloperSettingsPanel({
           <h2>Developer settings</h2>
           <p>{botCountText}</p>
         </div>
+        <button type="button" onClick={onLoadBots}>
+          Load server bots
+        </button>
       </div>
 
       <div className="developer-form" aria-label="Developer server context">
@@ -2110,6 +2143,10 @@ function createLocalBotToken() {
   const randomHex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
   const counterSuffix = localBotTokenCounter.toString(36).padStart(4, '0')
   return `ocb_${randomHex}${counterSuffix}`
+}
+
+function hiddenBotTokenLabel(lastFour: string | null) {
+  return lastFour ? `Hidden after creation - last 4 ${lastFour}` : 'Hidden after creation'
 }
 
 function displayChannelName(name: string) {
