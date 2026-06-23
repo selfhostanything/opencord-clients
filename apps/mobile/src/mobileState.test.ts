@@ -57,4 +57,70 @@ describe('mobile app state', () => {
       own: true,
     })
   })
+
+  it('receives realtime channel messages and marks unopened channels unread', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inGeneral = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'general' })
+    const state = mobileReducer(inGeneral, {
+      type: 'realtime.message_created',
+      envelope: {
+        id: 'evt_01973f83-f22a-73ba-ae76-5a045c52fc96',
+        type: 'message.created',
+        organization_id: 'org-1',
+        scope: { space_id: 'space-1', channel_id: 'backend' },
+        occurred_at: '2026-06-23T02:00:00.000Z',
+        data: {
+          message: {
+            id: 'msg-1',
+            channel_id: 'backend',
+            author_user_id: 'user-2',
+            content: 'Backend deploy finished',
+          },
+        },
+      },
+    })
+
+    expect(state.messages.at(-1)).toMatchObject({
+      id: 'msg-1',
+      channelId: 'backend',
+      authorName: 'user-2',
+      content: 'Backend deploy finished',
+      own: false,
+    })
+    expect(state.channels.find((channel) => channel.id === 'backend')?.unread).toBe(true)
+  })
+
+  it('receives realtime messages in the open channel without unread noise', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inBackend = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'backend' })
+    const state = mobileReducer(inBackend, {
+      type: 'realtime.message_created',
+      envelope: {
+        id: 'evt_01973f83-f22a-73ba-ae76-5a045c52fc96',
+        type: 'message.created',
+        organization_id: 'org-1',
+        scope: { space_id: 'space-1', channel_id: 'backend' },
+        occurred_at: '2026-06-23T02:00:00.000Z',
+        data: {
+          message: {
+            id: 'msg-2',
+            channel_id: 'backend',
+            author_user_id: 'user-2',
+            content: 'Watching logs now',
+          },
+        },
+      },
+    })
+
+    expect(state.messages.at(-1)?.content).toBe('Watching logs now')
+    expect(state.channels.find((channel) => channel.id === 'backend')?.unread).toBe(false)
+  })
 })

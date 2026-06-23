@@ -1,5 +1,9 @@
 import { DEFAULT_OPENCORD_SERVER_URL, normalizeOpenCordBaseUrl } from '@opencord/api-client'
-import { INITIAL_REALTIME_STATUS, type RealtimeConnectionStatus } from '@opencord/realtime'
+import {
+  INITIAL_REALTIME_STATUS,
+  type RealtimeConnectionStatus,
+  type RealtimeIncomingEnvelope,
+} from '@opencord/realtime'
 
 export type MobileScreen = 'login' | 'channels' | 'chat'
 
@@ -40,6 +44,7 @@ export type MobileAction =
   | { type: 'channel.select'; channelId: string }
   | { type: 'channel.back' }
   | { type: 'message.send'; content: string }
+  | { type: 'realtime.message_created'; envelope: RealtimeIncomingEnvelope }
 
 const initialChannels: MobileChannel[] = [
   {
@@ -153,6 +158,22 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
         ],
       }
     }
+    case 'realtime.message_created': {
+      const message = messageFromRealtimeEnvelope(action.envelope)
+      if (!message) {
+        return state
+      }
+
+      const isOpenChannel = state.screen === 'chat' && state.selectedChannelId === message.channelId
+
+      return {
+        ...state,
+        messages: [...state.messages, message],
+        channels: state.channels.map((channel) =>
+          channel.id === message.channelId ? { ...channel, unread: !isOpenChannel } : channel,
+        ),
+      }
+    }
   }
 }
 
@@ -168,4 +189,47 @@ export function selectedChannel(state: MobileAppState) {
 
 function displayNameForEmail(email: string) {
   return email.split('@')[0] || 'OpenCord user'
+}
+
+function messageFromRealtimeEnvelope(envelope: RealtimeIncomingEnvelope): MobileMessage | null {
+  if (envelope.type !== 'message.created' || !('data' in envelope)) {
+    return null
+  }
+
+  const data = objectValue(envelope.data)
+  const message = objectValue(data.message)
+  const channelId = stringValue(message.channel_id) ?? envelope.scope.channel_id
+  const content = stringValue(message.content)
+  if (!channelId || !content) {
+    return null
+  }
+
+  return {
+    id: stringValue(message.id) ?? envelope.id,
+    channelId,
+    authorName:
+      stringValue(message.author_display_name) ??
+      stringValue(message.author_user_id) ??
+      'Unknown user',
+    content,
+    time: timeLabel(envelope.occurred_at),
+    own: false,
+  }
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function timeLabel(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return 'now'
+  }
+
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
