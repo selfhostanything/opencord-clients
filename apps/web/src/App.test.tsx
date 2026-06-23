@@ -202,6 +202,149 @@ describe('OpenCord web chat UI', () => {
     expect(developerSettings).toHaveTextContent('Invited to OpenCord')
   })
 
+  it('uses server-backed developer bot APIs when server context is configured', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/healthz')) {
+        return {
+          ok: true,
+          json: async () => ({ status: 'ok', version: 'test-version' }),
+        }
+      }
+
+      if (url.endsWith('/organizations/01973f83-f22a-73ba-ae76-5a045c52fc96/bot-applications')) {
+        expect(init).toMatchObject({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        return {
+          ok: true,
+          json: async () => ({
+            bot_application: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+              bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+              created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc99',
+              name: 'Deploy Bot',
+              description: 'Posts release status into operations channels',
+              status: 'active',
+            },
+            bot_token: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fca0',
+              application_id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+              token: 'ocb_server_created',
+              token_last_four: 'ated',
+            },
+          }),
+        }
+      }
+
+      if (url.endsWith('/bot-applications/01973f83-f22a-73ba-ae76-5a045c52fc97/tokens/rotate')) {
+        expect(init).toMatchObject({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        return {
+          ok: true,
+          json: async () => ({
+            bot_token: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+              application_id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+              token: 'ocb_server_rotated',
+              token_last_four: 'ated',
+            },
+          }),
+        }
+      }
+
+      if (
+        url.endsWith(
+          '/bot-applications/01973f83-f22a-73ba-ae76-5a045c52fc97/spaces/01973f83-f22a-73ba-ae76-5a045c52fca2/invite',
+        )
+      ) {
+        expect(init).toMatchObject({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        return {
+          ok: true,
+          json: async () => ({
+            bot_application: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+              bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+              created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc99',
+              name: 'Deploy Bot',
+              description: 'Posts release status into operations channels',
+              status: 'active',
+            },
+            member: {
+              space_id: '01973f83-f22a-73ba-ae76-5a045c52fca2',
+              user_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+              role: 'member',
+              status: 'active',
+            },
+          }),
+        }
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Developer' }))
+
+    const developerSettings = screen.getByRole('region', { name: 'Developer settings' })
+    await userEvent.type(within(developerSettings).getByLabelText('Session token'), 'session-token')
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Organization ID'),
+      '01973f83-f22a-73ba-ae76-5a045c52fc96',
+    )
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Space ID'),
+      '01973f83-f22a-73ba-ae76-5a045c52fca2',
+    )
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Bot application name'),
+      'Deploy Bot',
+    )
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Bot application description'),
+      'Posts release status into operations channels',
+    )
+    await userEvent.click(
+      within(developerSettings).getByRole('button', { name: 'Create bot application' }),
+    )
+
+    await waitFor(() => {
+      expect(developerSettings).toHaveTextContent('ocb_server_created')
+    })
+
+    await userEvent.click(
+      within(developerSettings).getByRole('button', {
+        name: 'Rotate token for Deploy Bot',
+      }),
+    )
+    await waitFor(() => {
+      expect(developerSettings).toHaveTextContent('ocb_server_rotated')
+    })
+
+    await userEvent.click(
+      within(developerSettings).getByRole('button', {
+        name: 'Invite Deploy Bot to OpenCord',
+      }),
+    )
+    await waitFor(() => {
+      expect(developerSettings).toHaveTextContent('Invited to OpenCord')
+    })
+  })
+
   it('opens and leaves a meeting room from the calendar', async () => {
     render(<App />)
 

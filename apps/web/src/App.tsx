@@ -96,10 +96,13 @@ type ActivePanel = 'chat' | 'calendar' | 'developers' | 'meeting'
 
 type DeveloperBot = {
   id: string
+  organizationId?: string
+  botUserId?: string
   name: string
   description: string
   token: string
   invitedSpaceIds: string[]
+  serverManaged?: boolean
 }
 
 type CalendarMeeting = {
@@ -319,6 +322,10 @@ export default function App() {
   const [newMeetingEndsAt, setNewMeetingEndsAt] = useState('2026-06-25T10:30')
   const [meetingRoom, setMeetingRoom] = useState<MeetingRoomState | null>(null)
   const [developerBots, setDeveloperBots] = useState<DeveloperBot[]>([])
+  const [developerSessionToken, setDeveloperSessionToken] = useState('')
+  const [developerOrganizationId, setDeveloperOrganizationId] = useState('')
+  const [developerSpaceId, setDeveloperSpaceId] = useState('')
+  const [developerError, setDeveloperError] = useState<string | null>(null)
   const [newBotName, setNewBotName] = useState('')
   const [newBotDescription, setNewBotDescription] = useState('')
 
@@ -419,10 +426,56 @@ export default function App() {
     setActivePanel('developers')
   }
 
-  function createDeveloperBot(event: FormEvent<HTMLFormElement>) {
+  function developerApiContext() {
+    const sessionToken = developerSessionToken.trim()
+    const organizationId = developerOrganizationId.trim()
+    if (!sessionToken || !organizationId) {
+      return null
+    }
+
+    return {
+      client: createOpenCordApiClient({
+        baseUrl: activeConnection.baseUrl,
+        sessionToken,
+      }),
+      organizationId,
+    }
+  }
+
+  async function createDeveloperBot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const name = newBotName.trim()
     if (!name) {
+      return
+    }
+    const description = newBotDescription.trim()
+
+    setDeveloperError(null)
+    const context = developerApiContext()
+    if (context) {
+      try {
+        const created = await context.client.createBotApplication(context.organizationId, {
+          name,
+          description: description || undefined,
+        })
+        setDeveloperBots((current) => [
+          ...current,
+          {
+            id: created.botApplication.id,
+            organizationId: created.botApplication.organizationId,
+            botUserId: created.botApplication.botUserId,
+            name: created.botApplication.name,
+            description: created.botApplication.description || 'No description',
+            token: created.botToken.token,
+            invitedSpaceIds: [],
+            serverManaged: true,
+          },
+        ])
+        setNewBotName('')
+        setNewBotDescription('')
+      } catch (error) {
+        setDeveloperError(error instanceof Error ? error.message : 'Unable to create bot')
+      }
       return
     }
 
@@ -431,7 +484,7 @@ export default function App() {
       {
         id: createLocalBotId(name),
         name,
-        description: newBotDescription.trim() || 'No description',
+        description: description || 'No description',
         token: createLocalBotToken(),
         invitedSpaceIds: [],
       },
@@ -440,7 +493,24 @@ export default function App() {
     setNewBotDescription('')
   }
 
-  function rotateDeveloperBotToken(botId: string) {
+  async function rotateDeveloperBotToken(botId: string) {
+    setDeveloperError(null)
+    const bot = developerBots.find((candidate) => candidate.id === botId)
+    const context = developerApiContext()
+    if (bot?.serverManaged && context && bot.organizationId) {
+      try {
+        const token = await context.client.rotateBotToken(bot.organizationId, bot.id)
+        setDeveloperBots((current) =>
+          current.map((candidate) =>
+            candidate.id === botId ? { ...candidate, token: token.token } : candidate,
+          ),
+        )
+      } catch (error) {
+        setDeveloperError(error instanceof Error ? error.message : 'Unable to rotate token')
+      }
+      return
+    }
+
     setDeveloperBots((current) =>
       current.map((bot) =>
         bot.id === botId ? { ...bot, token: createLocalBotToken() } : bot,
@@ -448,7 +518,41 @@ export default function App() {
     )
   }
 
-  function inviteDeveloperBotToCurrentSpace(botId: string) {
+  async function inviteDeveloperBotToCurrentSpace(botId: string) {
+    setDeveloperError(null)
+    const bot = developerBots.find((candidate) => candidate.id === botId)
+    const context = developerApiContext()
+    const targetSpaceId = developerSpaceId.trim() || selectedSpace.id
+    if (bot?.serverManaged && context && bot.organizationId) {
+      try {
+        const invite = await context.client.inviteBotApplicationToSpace(
+          bot.organizationId,
+          bot.id,
+          targetSpaceId,
+          { role: 'member' },
+        )
+        setDeveloperBots((current) =>
+          current.map((candidate) => {
+            if (
+              candidate.id !== botId ||
+              candidate.invitedSpaceIds.includes(invite.member.spaceId)
+            ) {
+              return candidate
+            }
+
+            return {
+              ...candidate,
+              botUserId: invite.botApplication.botUserId,
+              invitedSpaceIds: [...candidate.invitedSpaceIds, invite.member.spaceId],
+            }
+          }),
+        )
+      } catch (error) {
+        setDeveloperError(error instanceof Error ? error.message : 'Unable to invite bot')
+      }
+      return
+    }
+
     setDeveloperBots((current) =>
       current.map((bot) => {
         if (bot.id !== botId || bot.invitedSpaceIds.includes(selectedSpace.id)) {
@@ -962,11 +1066,18 @@ export default function App() {
           <DeveloperSettingsPanel
             activeConnection={activeConnection}
             bots={developerBots}
+            developerError={developerError}
+            developerOrganizationId={developerOrganizationId}
+            developerSessionToken={developerSessionToken}
+            developerSpaceId={developerSpaceId}
             newBotDescription={newBotDescription}
             newBotName={newBotName}
             selectedSpace={selectedSpace}
             onCreateBot={createDeveloperBot}
             onInviteBot={inviteDeveloperBotToCurrentSpace}
+            onDeveloperOrganizationIdChange={setDeveloperOrganizationId}
+            onDeveloperSessionTokenChange={setDeveloperSessionToken}
+            onDeveloperSpaceIdChange={setDeveloperSpaceId}
             onNewBotDescriptionChange={setNewBotDescription}
             onNewBotNameChange={setNewBotName}
             onRotateToken={rotateDeveloperBotToken}
@@ -1148,10 +1259,17 @@ export default function App() {
 function DeveloperSettingsPanel({
   activeConnection,
   bots,
+  developerError,
+  developerOrganizationId,
+  developerSessionToken,
+  developerSpaceId,
   newBotDescription,
   newBotName,
   selectedSpace,
   onCreateBot,
+  onDeveloperOrganizationIdChange,
+  onDeveloperSessionTokenChange,
+  onDeveloperSpaceIdChange,
   onInviteBot,
   onNewBotDescriptionChange,
   onNewBotNameChange,
@@ -1159,16 +1277,24 @@ function DeveloperSettingsPanel({
 }: {
   activeConnection: ServerConnection
   bots: DeveloperBot[]
+  developerError: string | null
+  developerOrganizationId: string
+  developerSessionToken: string
+  developerSpaceId: string
   newBotDescription: string
   newBotName: string
   selectedSpace: Space
-  onCreateBot: (event: FormEvent<HTMLFormElement>) => void
-  onInviteBot: (botId: string) => void
+  onCreateBot: (event: FormEvent<HTMLFormElement>) => void | Promise<void>
+  onDeveloperOrganizationIdChange: (value: string) => void
+  onDeveloperSessionTokenChange: (value: string) => void
+  onDeveloperSpaceIdChange: (value: string) => void
+  onInviteBot: (botId: string) => void | Promise<void>
   onNewBotDescriptionChange: (value: string) => void
   onNewBotNameChange: (value: string) => void
-  onRotateToken: (botId: string) => void
+  onRotateToken: (botId: string) => void | Promise<void>
 }) {
   const serverBaseURL = activeConnection.baseUrl.replace(/\/+$/g, '')
+  const inviteTargetSpaceId = developerSpaceId.trim() || selectedSpace.id
   const botCountText = `${bots.length} bot ${
     bots.length === 1 ? 'application' : 'applications'
   }`
@@ -1181,6 +1307,40 @@ function DeveloperSettingsPanel({
           <p>{botCountText}</p>
         </div>
       </div>
+
+      <div className="developer-form" aria-label="Developer server context">
+        <div>
+          <label htmlFor="developer-session-token">Session token</label>
+          <input
+            id="developer-session-token"
+            type="password"
+            value={developerSessionToken}
+            onChange={(event) => onDeveloperSessionTokenChange(event.target.value)}
+          />
+        </div>
+        <div>
+          <label htmlFor="developer-organization-id">Organization ID</label>
+          <input
+            id="developer-organization-id"
+            value={developerOrganizationId}
+            onChange={(event) => onDeveloperOrganizationIdChange(event.target.value)}
+          />
+        </div>
+        <div>
+          <label htmlFor="developer-space-id">Space ID</label>
+          <input
+            id="developer-space-id"
+            value={developerSpaceId}
+            onChange={(event) => onDeveloperSpaceIdChange(event.target.value)}
+          />
+        </div>
+      </div>
+
+      {developerError ? (
+        <div className="empty-state" role="alert">
+          {developerError}
+        </div>
+      ) : null}
 
       <form className="developer-form" onSubmit={onCreateBot}>
         <div>
@@ -1210,7 +1370,7 @@ function DeveloperSettingsPanel({
           <div className="empty-state">No bot applications yet.</div>
         ) : (
           bots.map((bot) => {
-            const isInvited = bot.invitedSpaceIds.includes(selectedSpace.id)
+            const isInvited = bot.invitedSpaceIds.includes(inviteTargetSpaceId)
 
             return (
               <article key={bot.id} className="developer-bot-card">

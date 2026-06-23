@@ -52,6 +52,49 @@ export type AuthResult = {
   session: AuthSession
 }
 
+export type CreateBotApplicationRequest = {
+  name: string
+  description?: string
+}
+
+export type BotApplication = {
+  id: string
+  organizationId: string
+  botUserId: string
+  createdByUserId: string
+  name: string
+  description: string | null
+  status: string
+}
+
+export type BotToken = {
+  id: string
+  applicationId: string
+  token: string
+  tokenLastFour: string
+}
+
+export type BotApplicationCreated = {
+  botApplication: BotApplication
+  botToken: BotToken
+}
+
+export type InviteBotToSpaceRequest = {
+  role?: 'member' | 'guest'
+}
+
+export type SpaceMember = {
+  spaceId: string
+  userId: string
+  role: string
+  status: string
+}
+
+export type BotApplicationInvite = {
+  botApplication: BotApplication
+  member: SpaceMember
+}
+
 export type OidcProvider = {
   organizationId: string
   issuer: string
@@ -226,6 +269,44 @@ type AuthSessionPayload = {
 type AuthResultPayload = {
   user?: unknown
   session?: unknown
+}
+
+type BotApplicationPayload = {
+  id?: unknown
+  organization_id?: unknown
+  bot_user_id?: unknown
+  created_by_user_id?: unknown
+  name?: unknown
+  description?: unknown
+  status?: unknown
+}
+
+type BotTokenPayload = {
+  id?: unknown
+  application_id?: unknown
+  token?: unknown
+  token_last_four?: unknown
+}
+
+type BotApplicationCreatedPayload = {
+  bot_application?: unknown
+  bot_token?: unknown
+}
+
+type BotTokenResourcePayload = {
+  bot_token?: unknown
+}
+
+type SpaceMemberPayload = {
+  space_id?: unknown
+  user_id?: unknown
+  role?: unknown
+  status?: unknown
+}
+
+type BotApplicationInvitePayload = {
+  bot_application?: unknown
+  member?: unknown
 }
 
 type OidcProviderPayload = {
@@ -523,6 +604,60 @@ export class OpenCordApiClient {
     return commandInteractionFromPayload(payload.interaction)
   }
 
+  async createBotApplication(
+    organizationId: string,
+    request: CreateBotApplicationRequest,
+  ): Promise<BotApplicationCreated> {
+    const payload = await this.requestJson<BotApplicationCreatedPayload>(
+      `/organizations/${encodeURIComponent(organizationId)}/bot-applications`,
+      {
+        body: JSON.stringify({
+          name: request.name,
+          description: request.description,
+        }),
+        method: 'POST',
+      },
+    )
+
+    return botApplicationCreatedFromPayload(payload)
+  }
+
+  async rotateBotToken(organizationId: string, applicationId: string): Promise<BotToken> {
+    const payload = await this.requestJson<BotTokenResourcePayload>(
+      `/organizations/${encodeURIComponent(
+        organizationId,
+      )}/bot-applications/${encodeURIComponent(applicationId)}/tokens/rotate`,
+      {
+        method: 'POST',
+      },
+    )
+
+    return botTokenFromPayload(payload.bot_token)
+  }
+
+  async inviteBotApplicationToSpace(
+    organizationId: string,
+    applicationId: string,
+    spaceId: string,
+    request: InviteBotToSpaceRequest = {},
+  ): Promise<BotApplicationInvite> {
+    const payload = await this.requestJson<BotApplicationInvitePayload>(
+      `/organizations/${encodeURIComponent(
+        organizationId,
+      )}/bot-applications/${encodeURIComponent(applicationId)}/spaces/${encodeURIComponent(
+        spaceId,
+      )}/invite`,
+      {
+        body: JSON.stringify({
+          role: request.role ?? 'member',
+        }),
+        method: 'POST',
+      },
+    )
+
+    return botApplicationInviteFromPayload(payload)
+  }
+
   async resolveMeetingJoinUrl(joinSlug: string): Promise<Meeting> {
     const payload = await this.requestJson<MeetingResourcePayload>(
       `/join/${encodeURIComponent(joinSlug)}`,
@@ -669,6 +804,56 @@ function commandInteractionFromPayload(value: unknown): CommandInteraction {
     options: arrayValue(payload.options).map(objectValue),
     createdAt: stringValue(payload.created_at, ''),
     respondedAt: nullableStringValue(payload.responded_at),
+  }
+}
+
+function botApplicationCreatedFromPayload(value: BotApplicationCreatedPayload): BotApplicationCreated {
+  return {
+    botApplication: botApplicationFromPayload(value.bot_application),
+    botToken: botTokenFromPayload(value.bot_token),
+  }
+}
+
+function botApplicationInviteFromPayload(value: BotApplicationInvitePayload): BotApplicationInvite {
+  return {
+    botApplication: botApplicationFromPayload(value.bot_application),
+    member: spaceMemberFromPayload(value.member),
+  }
+}
+
+function botApplicationFromPayload(value: unknown): BotApplication {
+  const payload = objectValue(value) as BotApplicationPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    botUserId: stringValue(payload.bot_user_id, ''),
+    createdByUserId: stringValue(payload.created_by_user_id, ''),
+    name: stringValue(payload.name, ''),
+    description: nullableStringValue(payload.description),
+    status: stringValue(payload.status, 'active'),
+  }
+}
+
+function botTokenFromPayload(value: unknown): BotToken {
+  const payload = objectValue(value) as BotTokenPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    applicationId: stringValue(payload.application_id, ''),
+    token: stringValue(payload.token, ''),
+    tokenLastFour: stringValue(payload.token_last_four, ''),
+  }
+}
+
+function spaceMemberFromPayload(value: unknown): SpaceMember {
+  const payload = objectValue(value) as SpaceMemberPayload
+
+  return {
+    spaceId: stringValue(payload.space_id, ''),
+    userId: stringValue(payload.user_id, ''),
+    role: stringValue(payload.role, 'member'),
+    status: stringValue(payload.status, 'active'),
   }
 }
 

@@ -451,6 +451,171 @@ describe('OpenCord API client', () => {
     )
   })
 
+  it('creates a bot application with bearer auth and maps shown-once token', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        bot_application: {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fcb1',
+          organization_id: '01973f83-f22a-73ba-ae76-5a045c52fcb2',
+          bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fcb3',
+          created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fcb4',
+          name: 'Deploy Bot',
+          description: 'Posts release status',
+          status: 'active',
+        },
+        bot_token: {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fcb5',
+          application_id: '01973f83-f22a-73ba-ae76-5a045c52fcb1',
+          token: 'ocb_shown_once',
+          token_last_four: 'once',
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.createBotApplication('01973f83-f22a-73ba-ae76-5a045c52fcb2', {
+        name: 'Deploy Bot',
+        description: 'Posts release status',
+      }),
+    ).resolves.toEqual({
+      botApplication: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fcb1',
+        organizationId: '01973f83-f22a-73ba-ae76-5a045c52fcb2',
+        botUserId: '01973f83-f22a-73ba-ae76-5a045c52fcb3',
+        createdByUserId: '01973f83-f22a-73ba-ae76-5a045c52fcb4',
+        name: 'Deploy Bot',
+        description: 'Posts release status',
+        status: 'active',
+      },
+      botToken: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fcb5',
+        applicationId: '01973f83-f22a-73ba-ae76-5a045c52fcb1',
+        token: 'ocb_shown_once',
+        tokenLastFour: 'once',
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://chat.example.com/organizations/01973f83-f22a-73ba-ae76-5a045c52fcb2/bot-applications',
+      {
+        body: JSON.stringify({
+          name: 'Deploy Bot',
+          description: 'Posts release status',
+        }),
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      },
+    )
+  })
+
+  it('rotates a bot token and invites a bot application to a space', async () => {
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          bot_token: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fcc1',
+            application_id: '01973f83-f22a-73ba-ae76-5a045c52fcc2',
+            token: 'ocb_rotated_once',
+            token_last_four: 'once',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          bot_application: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fcc2',
+            organization_id: '01973f83-f22a-73ba-ae76-5a045c52fcc3',
+            bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fcc4',
+            created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fcc5',
+            name: 'Deploy Bot',
+            description: null,
+            status: 'active',
+          },
+          member: {
+            space_id: '01973f83-f22a-73ba-ae76-5a045c52fcc6',
+            user_id: '01973f83-f22a-73ba-ae76-5a045c52fcc4',
+            role: 'member',
+            status: 'active',
+          },
+        }),
+      )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.rotateBotToken(
+        '01973f83-f22a-73ba-ae76-5a045c52fcc3',
+        '01973f83-f22a-73ba-ae76-5a045c52fcc2',
+      ),
+    ).resolves.toEqual({
+      id: '01973f83-f22a-73ba-ae76-5a045c52fcc1',
+      applicationId: '01973f83-f22a-73ba-ae76-5a045c52fcc2',
+      token: 'ocb_rotated_once',
+      tokenLastFour: 'once',
+    })
+    await expect(
+      client.inviteBotApplicationToSpace(
+        '01973f83-f22a-73ba-ae76-5a045c52fcc3',
+        '01973f83-f22a-73ba-ae76-5a045c52fcc2',
+        '01973f83-f22a-73ba-ae76-5a045c52fcc6',
+        { role: 'member' },
+      ),
+    ).resolves.toEqual({
+      botApplication: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fcc2',
+        organizationId: '01973f83-f22a-73ba-ae76-5a045c52fcc3',
+        botUserId: '01973f83-f22a-73ba-ae76-5a045c52fcc4',
+        createdByUserId: '01973f83-f22a-73ba-ae76-5a045c52fcc5',
+        name: 'Deploy Bot',
+        description: null,
+        status: 'active',
+      },
+      member: {
+        spaceId: '01973f83-f22a-73ba-ae76-5a045c52fcc6',
+        userId: '01973f83-f22a-73ba-ae76-5a045c52fcc4',
+        role: 'member',
+        status: 'active',
+      },
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://chat.example.com/organizations/01973f83-f22a-73ba-ae76-5a045c52fcc3/bot-applications/01973f83-f22a-73ba-ae76-5a045c52fcc2/tokens/rotate',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+        method: 'POST',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://chat.example.com/organizations/01973f83-f22a-73ba-ae76-5a045c52fcc3/bot-applications/01973f83-f22a-73ba-ae76-5a045c52fcc2/spaces/01973f83-f22a-73ba-ae76-5a045c52fcc6/invite',
+      {
+        body: JSON.stringify({ role: 'member' }),
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      },
+    )
+  })
+
   it('resolves meeting join URLs through the typed API', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(
