@@ -1,51 +1,60 @@
-# OpenCord Clients
+# OpenCord
 
-OpenCord official web, desktop, mobile, and shared TypeScript client packages.
+OpenCord is a self-hostable, Discord-like workspace chat client for teams,
+communities, and organizations that want control over where their conversations
+live.
 
-## License
+This repository contains the official open-source clients:
 
-Apache-2.0.
+- Web app
+- Electron desktop app
+- React Native mobile app
+- Shared TypeScript SDK packages
 
-## Runtime
+The clients can connect to any compatible OpenCord server URL, including a
+self-hosted server, an organization-owned deployment, or a managed OpenCord
+cloud tenant.
 
-Use Node.js 26 with `fnm`.
+## Why OpenCord
+
+- Own your chat data instead of depending on a single hosted platform.
+- Use familiar Discord-style chat, channels, voice, meetings, webhooks, and bot
+  workflows.
+- Connect one client to multiple OpenCord servers.
+- Keep the client open source while allowing different server deployment models.
+
+## Current Status
+
+OpenCord is in early MVP development. The client already includes core chat UI,
+multi-server connection management, desktop/mobile shells, meeting and voice UI
+surfaces, rich embeds, and developer panels for bot and webhook workflows.
+
+The project is not a Discord clone. Compatibility exists to make migration
+easier for common bot and webhook workflows while preserving OpenCord's own
+permissions, identity, and deployment model.
+
+## Quick Start
 
 ```bash
 fnm use 26
 corepack enable
 pnpm install
-```
-
-## Apps
-
-- `apps/web`: React/Vite web client shell with multi-server switching, chat UI, calendar tab, meeting room UI, voice controls, and screen share controls.
-- `apps/desktop`: Electron shell placeholder for Phase 02.
-- `apps/mobile`: React Native/Expo shell with mobile chat, voice, and connection state.
-
-## Packages
-
-- `packages/api-client`: REST API client, push token methods, voice join method, meeting join URL resolver, and generated SDK boundary.
-- `packages/realtime`: realtime gateway client boundary.
-- `packages/server-connections`: shared multi-server connection manager and persistence helpers.
-- `packages/media`: media integration client boundary.
-- `packages/types`: shared TypeScript types.
-- `packages/validation`: shared validation schemas.
-- `packages/permissions`: shared permission helpers.
-- `packages/ui-tokens`: shared design tokens.
-
-## Development
-
-```bash
-pnpm install
 pnpm --filter web dev
-pnpm --filter web test
-pnpm --filter web build
 ```
 
-The web shell defaults to `http://localhost:8080` and can add, switch, remove,
-and persist multiple compatible OpenCord server connections.
+The web client defaults to `http://localhost:8080` for local development.
 
-Verified customer custom domains work as normal server URLs. For example, once
-`customer.example.com` resolves through the OpenCord ingress and the server
-custom-domain mapping is active, the official web, desktop, and mobile clients
-can connect to `https://customer.example.com`.
+## Repository
+
+```text
+apps/web       Web client
+apps/desktop   Electron desktop shell
+apps/mobile    React Native mobile app
+packages/*     Shared client packages
+```
+
+Developer details live in [docs/development.md](docs/development.md).
+
+## License
+
+Apache-2.0
