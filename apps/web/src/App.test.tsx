@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -122,6 +122,35 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByText('You can view this channel but cannot send messages.')).toBeInTheDocument()
     expect(screen.getByLabelText('Message composer')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+  })
+
+  it('shows the calendar tab and creates a local meeting', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+
+    expect(screen.getByRole('heading', { name: 'Calendar' })).toBeInTheDocument()
+    const upcomingMeetings = screen.getByLabelText('Upcoming meetings')
+    expect(upcomingMeetings).toHaveTextContent('Roadmap Review')
+    expect(upcomingMeetings).toHaveTextContent('Join URL')
+
+    await userEvent.click(screen.getByRole('button', { name: 'New meeting' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Create meeting' })
+    await userEvent.type(within(dialog).getByLabelText('Meeting title'), 'Design Sync')
+    fireEvent.change(within(dialog).getByLabelText('Start time'), {
+      target: { value: '2026-06-25T10:00' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('End time'), {
+      target: { value: '2026-06-25T10:30' },
+    })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create meeting' }))
+
+    expect(screen.queryByRole('dialog', { name: 'Create meeting' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Upcoming meetings')).toHaveTextContent('Design Sync')
+    expect(screen.getByLabelText('Upcoming meetings')).toHaveTextContent(
+      'http://localhost:8080/join/local-design-sync',
+    )
   })
 
   it('shows voice channels with connected users and local controls', async () => {

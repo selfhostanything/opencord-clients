@@ -185,7 +185,8 @@ button {
 
 .server-form label,
 .channel-form label,
-.edit-bar label {
+.edit-bar label,
+.meeting-dialog label {
   display: block;
   margin-bottom: 7px;
   color: #aeb5ac;
@@ -203,6 +204,7 @@ button {
 .server-form input,
 .channel-form input,
 .edit-bar input,
+.meeting-dialog input,
 .composer textarea {
   width: 100%;
   border: 1px solid #393939;
@@ -214,7 +216,8 @@ button {
 
 .server-form input,
 .channel-form input,
-.edit-bar input {
+.edit-bar input,
+.meeting-dialog input {
   min-height: 36px;
   padding: 8px 10px;
   font-size: 13px;
@@ -235,7 +238,9 @@ button {
 .server-connection-row button,
 .voice-channel-button,
 .voice-join-button,
-.voice-control-buttons button {
+.voice-control-buttons button,
+.calendar-toolbar button,
+.meeting-dialog-actions button {
   border: 0;
   border-radius: 6px;
   color: #ffffff;
@@ -577,6 +582,7 @@ button {
 }
 
 .chat-panel {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -617,6 +623,192 @@ button {
   min-width: 64px;
   height: 34px;
   background: #343434;
+}
+
+.header-actions button[aria-pressed="true"] {
+  background: #28796d;
+}
+
+.calendar-panel {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.calendar-toolbar h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.calendar-toolbar p {
+  margin: 4px 0 0;
+  color: #9ea49b;
+  font-size: 13px;
+}
+
+.calendar-toolbar button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.meeting-list {
+  display: grid;
+  gap: 12px;
+}
+
+.meeting-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #202020;
+}
+
+.meeting-card-time {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #171717;
+}
+
+.meeting-card-time time {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.meeting-card-time span {
+  color: #aeb5ac;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.meeting-card-body {
+  min-width: 0;
+}
+
+.meeting-card-body header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.meeting-card-body h3 {
+  overflow: hidden;
+  margin: 0;
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meeting-card-body header span {
+  flex: 0 0 auto;
+  color: #86e0bb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.meeting-card-body p {
+  margin: 6px 0 10px;
+  color: #c8cdc5;
+  font-size: 13px;
+}
+
+.meeting-join {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.meeting-join strong {
+  color: #aeb5ac;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.meeting-join code {
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: #dbece5;
+  background: #17221f;
+  font-size: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 10, 10, 0.72);
+}
+
+.meeting-dialog {
+  width: min(480px, 100%);
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+  background: #222222;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+}
+
+.meeting-dialog form {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.meeting-dialog header h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 18px;
+}
+
+.meeting-dialog header p {
+  margin: 4px 0 0;
+  color: #9ea49b;
+  font-size: 13px;
+}
+
+.meeting-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.meeting-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.meeting-dialog-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  background: #343434;
+}
+
+.meeting-dialog-actions button[type="submit"] {
+  background: #28796d;
 }
 
 .message-timeline {
@@ -983,6 +1175,25 @@ button {
 
   .header-actions {
     flex-wrap: wrap;
+  }
+
+  .calendar-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .calendar-toolbar button {
+    width: 100%;
+  }
+
+  .meeting-card,
+  .meeting-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-backdrop {
+    align-items: start;
+    overflow: auto;
   }
 
   .composer button {

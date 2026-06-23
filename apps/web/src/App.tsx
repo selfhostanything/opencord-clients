@@ -92,6 +92,19 @@ type ScreenShareState =
   | { status: 'sharing'; stream: MediaStream }
   | { status: 'error'; message: string }
 
+type ActivePanel = 'chat' | 'calendar'
+
+type CalendarMeeting = {
+  id: string
+  title: string
+  startsAt: string
+  endsAt: string
+  channelId: string
+  organizer: string
+  joinUrl: string
+  status: 'scheduled' | 'cancelled'
+}
+
 const initialSpaces: Space[] = [
   { id: 'opencord', name: 'OpenCord', initials: 'OC', unread: true, mentions: 2 },
   { id: 'platform', name: 'Platform', initials: 'PF', unread: false, mentions: 0 },
@@ -230,6 +243,29 @@ const initialVoiceState: VoiceState = {
   ],
 }
 
+const initialMeetings: CalendarMeeting[] = [
+  {
+    id: 'meeting-roadmap-review',
+    title: 'Roadmap Review',
+    startsAt: '2026-06-24T09:00',
+    endsAt: '2026-06-24T09:30',
+    channelId: 'general',
+    organizer: 'Mira',
+    joinUrl: 'http://localhost:8080/join/mtg-roadmap-review',
+    status: 'scheduled',
+  },
+  {
+    id: 'meeting-office-hours',
+    title: 'Office Hours',
+    startsAt: '2026-06-24T13:00',
+    endsAt: '2026-06-24T14:00',
+    channelId: 'office-hours',
+    organizer: 'Thanet',
+    joinUrl: 'http://localhost:8080/join/mtg-office-hours',
+    status: 'scheduled',
+  },
+]
+
 export default function App() {
   const [serverConnections, setServerConnections] = useState(() =>
     loadBrowserServerConnectionState(),
@@ -253,6 +289,12 @@ export default function App() {
   const [editingMessage, setEditingMessage] = useState<{ id: string; body: string } | null>(null)
   const [voiceState, setVoiceState] = useState(initialVoiceState)
   const [screenShareState, setScreenShareState] = useState<ScreenShareState>({ status: 'idle' })
+  const [activePanel, setActivePanel] = useState<ActivePanel>('chat')
+  const [meetings, setMeetings] = useState(initialMeetings)
+  const [showMeetingForm, setShowMeetingForm] = useState(false)
+  const [newMeetingTitle, setNewMeetingTitle] = useState('')
+  const [newMeetingStartsAt, setNewMeetingStartsAt] = useState('2026-06-25T10:00')
+  const [newMeetingEndsAt, setNewMeetingEndsAt] = useState('2026-06-25T10:30')
 
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0]
   const visibleChannels = channels.filter((channel) => channel.spaceId === selectedSpace.id)
@@ -260,7 +302,10 @@ export default function App() {
     visibleChannels.find((channel) => channel.id === selectedChannelId) ?? visibleChannels[0]
   const channelMessages = messages.filter((message) => message.channelId === selectedChannel.id)
   const groupedMembers = useMemo(() => groupMembersByRole(members), [])
-  const realtimeURL = useMemo(() => safeRealtimeURL(activeConnection.baseUrl), [activeConnection.baseUrl])
+  const realtimeURL = useMemo(
+    () => safeRealtimeURL(activeConnection.baseUrl),
+    [activeConnection.baseUrl],
+  )
 
   async function checkServer(targetURL = activeConnection.baseUrl) {
     setHealth({ status: 'checking' })
@@ -323,7 +368,13 @@ export default function App() {
     if (firstChannel) {
       setSelectedChannelId(firstChannel.id)
       setPendingAttachments([])
+      setActivePanel('chat')
     }
+  }
+
+  function selectTextChannel(channelId: string) {
+    setSelectedChannelId(channelId)
+    setActivePanel('chat')
   }
 
   function addChannel(event: FormEvent<HTMLFormElement>) {
@@ -349,6 +400,46 @@ export default function App() {
     setSelectedChannelId(channel.id)
     setNewChannelName('')
     setShowChannelForm(false)
+  }
+
+  function createMeeting(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const title = newMeetingTitle.trim()
+    if (
+      !title ||
+      !newMeetingStartsAt ||
+      !newMeetingEndsAt ||
+      newMeetingEndsAt <= newMeetingStartsAt
+    ) {
+      return
+    }
+
+    const joinSlug = `local-${slugForMeetingTitle(title)}`
+    const meeting: CalendarMeeting = {
+      id: `${joinSlug}-${Date.now()}`,
+      title,
+      startsAt: newMeetingStartsAt,
+      endsAt: newMeetingEndsAt,
+      channelId: selectedChannel.id,
+      organizer: 'You',
+      joinUrl: `${activeConnection.baseUrl.replace(/\/+$/g, '')}/join/${joinSlug}`,
+      status: 'scheduled',
+    }
+
+    setMeetings((current) =>
+      [...current, meeting].sort((left, right) => left.startsAt.localeCompare(right.startsAt)),
+    )
+    setNewMeetingTitle('')
+    setNewMeetingStartsAt('2026-06-25T10:00')
+    setNewMeetingEndsAt('2026-06-25T10:30')
+    setShowMeetingForm(false)
+  }
+
+  function cancelMeetingForm() {
+    setNewMeetingTitle('')
+    setNewMeetingStartsAt('2026-06-25T10:00')
+    setNewMeetingEndsAt('2026-06-25T10:30')
+    setShowMeetingForm(false)
   }
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -674,7 +765,7 @@ export default function App() {
                   channel={channel}
                   selectedChannelId={selectedChannel.id}
                   voiceState={voiceState}
-                  onSelectTextChannel={setSelectedChannelId}
+                  onSelectTextChannel={selectTextChannel}
                   onJoinVoice={joinVoiceChannel}
                 />
               ))}
@@ -712,8 +803,19 @@ export default function App() {
             <p>{selectedChannel.topic}</p>
           </div>
           <div className="header-actions" aria-label="Channel tools">
-            <button type="button" aria-label="Search messages">
-              Search
+            <button
+              type="button"
+              aria-pressed={activePanel === 'chat'}
+              onClick={() => setActivePanel('chat')}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              aria-pressed={activePanel === 'calendar'}
+              onClick={() => setActivePanel('calendar')}
+            >
+              Calendar
             </button>
             <button type="button" aria-label="Toggle members">
               Panel
@@ -721,122 +823,146 @@ export default function App() {
           </div>
         </header>
 
-        <section className="message-timeline" aria-label="Message timeline">
-          {channelMessages.length === 0 ? (
-            <div className="empty-state">No messages yet. Start the channel.</div>
-          ) : (
-            channelMessages.map((message) => (
-              <article key={message.id} className="message-card">
-                <div className="message-avatar" aria-hidden="true">
-                  {initialsFor(message.author)}
-                </div>
-                <div className="message-body">
-                  <header>
-                    <strong>{message.author}</strong>
-                    <span>{message.role}</span>
-                    <time>{message.time}</time>
-                    {message.edited ? <em>edited</em> : null}
-                  </header>
-                  <p>{message.body}</p>
-                  <AttachmentList attachments={message.attachments} />
-                  {message.own ? (
-                    <div className="message-actions">
+        {activePanel === 'calendar' ? (
+          <CalendarPanel
+            channels={channels}
+            meetings={meetings}
+            newMeetingEndsAt={newMeetingEndsAt}
+            newMeetingStartsAt={newMeetingStartsAt}
+            newMeetingTitle={newMeetingTitle}
+            selectedChannel={selectedChannel}
+            showMeetingForm={showMeetingForm}
+            onCancelMeetingForm={cancelMeetingForm}
+            onCreateMeeting={createMeeting}
+            onNewMeetingEndsAtChange={setNewMeetingEndsAt}
+            onNewMeetingStartsAtChange={setNewMeetingStartsAt}
+            onNewMeetingTitleChange={setNewMeetingTitle}
+            onShowMeetingForm={() => setShowMeetingForm(true)}
+          />
+        ) : (
+          <>
+            <section className="message-timeline" aria-label="Message timeline">
+              {channelMessages.length === 0 ? (
+                <div className="empty-state">No messages yet. Start the channel.</div>
+              ) : (
+                channelMessages.map((message) => (
+                  <article key={message.id} className="message-card">
+                    <div className="message-avatar" aria-hidden="true">
+                      {initialsFor(message.author)}
+                    </div>
+                    <div className="message-body">
+                      <header>
+                        <strong>{message.author}</strong>
+                        <span>{message.role}</span>
+                        <time>{message.time}</time>
+                        {message.edited ? <em>edited</em> : null}
+                      </header>
+                      <p>{message.body}</p>
+                      <AttachmentList attachments={message.attachments} />
+                      {message.own ? (
+                        <div className="message-actions">
+                          <button
+                            type="button"
+                            aria-label="Edit message"
+                            onClick={() =>
+                              setEditingMessage({ id: message.id, body: message.body })
+                            }
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Delete message"
+                            onClick={() => deleteMessage(message.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </article>
+                ))
+              )}
+            </section>
+
+            {selectedChannel.canSend ? (
+              <div className="typing-line" data-realtime-url={realtimeURL}>
+                {composerText.trim() ? 'You are typing...' : realtimeStatusText(realtimeStatus)}
+              </div>
+            ) : (
+              <div className="permission-banner">
+                You can view this channel but cannot send messages.
+              </div>
+            )}
+
+            {editingMessage ? (
+              <form className="edit-bar" onSubmit={saveEdit}>
+                <label htmlFor="edit-message-text">Edit message text</label>
+                <input
+                  id="edit-message-text"
+                  value={editingMessage.body}
+                  onChange={(event) =>
+                    setEditingMessage((current) =>
+                      current ? { ...current, body: event.target.value } : current,
+                    )
+                  }
+                />
+                <button type="submit">Save edit</button>
+                <button type="button" onClick={() => setEditingMessage(null)}>
+                  Cancel
+                </button>
+              </form>
+            ) : null}
+
+            <form className="composer" onSubmit={sendMessage}>
+              {pendingAttachments.length > 0 ? (
+                <div className="pending-attachments" aria-label="Pending attachments">
+                  {pendingAttachments.map((attachment) => (
+                    <div key={attachment.id} className="pending-attachment">
+                      <AttachmentSummary attachment={attachment} />
                       <button
                         type="button"
-                        aria-label="Edit message"
-                        onClick={() => setEditingMessage({ id: message.id, body: message.body })}
+                        aria-label={`Remove ${attachment.fileName}`}
+                        onClick={() => removePendingAttachment(attachment.id)}
                       >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Delete message"
-                        onClick={() => deleteMessage(message.id)}
-                      >
-                        Delete
+                        Remove
                       </button>
                     </div>
-                  ) : null}
+                  ))}
                 </div>
-              </article>
-            ))
-          )}
-        </section>
-
-        {selectedChannel.canSend ? (
-          <div className="typing-line" data-realtime-url={realtimeURL}>
-            {composerText.trim() ? 'You are typing...' : realtimeStatusText(realtimeStatus)}
-          </div>
-        ) : (
-          <div className="permission-banner">You can view this channel but cannot send messages.</div>
+              ) : null}
+              <label className="attach-button" title="Attach file">
+                <span aria-hidden="true">+</span>
+                <input
+                  aria-label="Attach file"
+                  type="file"
+                  multiple
+                  disabled={!selectedChannel.canSend}
+                  onChange={(event) => {
+                    attachFiles(event.currentTarget.files)
+                    event.currentTarget.value = ''
+                  }}
+                />
+              </label>
+              <textarea
+                aria-label="Message composer"
+                placeholder={`Message #${selectedChannel.name}`}
+                value={composerText}
+                disabled={!selectedChannel.canSend}
+                onChange={(event) => setComposerText(event.target.value)}
+              />
+              <button
+                type="submit"
+                disabled={
+                  !selectedChannel.canSend ||
+                  (!composerText.trim() && pendingAttachments.length === 0)
+                }
+              >
+                Send message
+              </button>
+            </form>
+          </>
         )}
-
-        {editingMessage ? (
-          <form className="edit-bar" onSubmit={saveEdit}>
-            <label htmlFor="edit-message-text">Edit message text</label>
-            <input
-              id="edit-message-text"
-              value={editingMessage.body}
-              onChange={(event) =>
-                setEditingMessage((current) =>
-                  current ? { ...current, body: event.target.value } : current,
-                )
-              }
-            />
-            <button type="submit">Save edit</button>
-            <button type="button" onClick={() => setEditingMessage(null)}>
-              Cancel
-            </button>
-          </form>
-        ) : null}
-
-        <form className="composer" onSubmit={sendMessage}>
-          {pendingAttachments.length > 0 ? (
-            <div className="pending-attachments" aria-label="Pending attachments">
-              {pendingAttachments.map((attachment) => (
-                <div key={attachment.id} className="pending-attachment">
-                  <AttachmentSummary attachment={attachment} />
-                  <button
-                    type="button"
-                    aria-label={`Remove ${attachment.fileName}`}
-                    onClick={() => removePendingAttachment(attachment.id)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          <label className="attach-button" title="Attach file">
-            <span aria-hidden="true">+</span>
-            <input
-              aria-label="Attach file"
-              type="file"
-              multiple
-              disabled={!selectedChannel.canSend}
-              onChange={(event) => {
-                attachFiles(event.currentTarget.files)
-                event.currentTarget.value = ''
-              }}
-            />
-          </label>
-          <textarea
-            aria-label="Message composer"
-            placeholder={`Message #${selectedChannel.name}`}
-            value={composerText}
-            disabled={!selectedChannel.canSend}
-            onChange={(event) => setComposerText(event.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={
-              !selectedChannel.canSend ||
-              (!composerText.trim() && pendingAttachments.length === 0)
-            }
-          >
-            Send message
-          </button>
-        </form>
       </section>
 
       <aside className="members-panel" aria-label="Members">
@@ -857,6 +983,124 @@ export default function App() {
         ))}
       </aside>
     </main>
+  )
+}
+
+function CalendarPanel({
+  channels,
+  meetings,
+  newMeetingEndsAt,
+  newMeetingStartsAt,
+  newMeetingTitle,
+  selectedChannel,
+  showMeetingForm,
+  onCancelMeetingForm,
+  onCreateMeeting,
+  onNewMeetingEndsAtChange,
+  onNewMeetingStartsAtChange,
+  onNewMeetingTitleChange,
+  onShowMeetingForm,
+}: {
+  channels: Channel[]
+  meetings: CalendarMeeting[]
+  newMeetingEndsAt: string
+  newMeetingStartsAt: string
+  newMeetingTitle: string
+  selectedChannel: Channel
+  showMeetingForm: boolean
+  onCancelMeetingForm: () => void
+  onCreateMeeting: (event: FormEvent<HTMLFormElement>) => void
+  onNewMeetingEndsAtChange: (value: string) => void
+  onNewMeetingStartsAtChange: (value: string) => void
+  onNewMeetingTitleChange: (value: string) => void
+  onShowMeetingForm: () => void
+}) {
+  const scheduledMeetings = meetings.filter((meeting) => meeting.status === 'scheduled')
+
+  return (
+    <section className="calendar-panel" aria-label="Calendar">
+      <div className="calendar-toolbar">
+        <div>
+          <h2>Calendar</h2>
+          <p>{scheduledMeetings.length} scheduled meetings</p>
+        </div>
+        <button type="button" onClick={onShowMeetingForm}>
+          New meeting
+        </button>
+      </div>
+
+      <section className="meeting-list" aria-label="Upcoming meetings">
+        {scheduledMeetings.map((meeting) => (
+          <article key={meeting.id} className="meeting-card">
+            <div className="meeting-card-time">
+              <time dateTime={meeting.startsAt}>{formatMeetingDay(meeting.startsAt)}</time>
+              <span>{formatMeetingClock(meeting.startsAt, meeting.endsAt)}</span>
+            </div>
+            <div className="meeting-card-body">
+              <header>
+                <h3>{meeting.title}</h3>
+                <span>{meetingChannelName(meeting, channels)}</span>
+              </header>
+              <p>Organized by {meeting.organizer}</p>
+              <div className="meeting-join">
+                <strong>Join URL</strong>
+                <code>{meeting.joinUrl}</code>
+              </div>
+            </div>
+          </article>
+        ))}
+      </section>
+
+      {showMeetingForm ? (
+        <div className="modal-backdrop">
+          <section
+            className="meeting-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-meeting-title"
+          >
+            <form onSubmit={onCreateMeeting}>
+              <header>
+                <h2 id="create-meeting-title">Create meeting</h2>
+                <p>#{selectedChannel.name}</p>
+              </header>
+              <label htmlFor="meeting-title">Meeting title</label>
+              <input
+                id="meeting-title"
+                value={newMeetingTitle}
+                onChange={(event) => onNewMeetingTitleChange(event.target.value)}
+              />
+              <div className="meeting-form-grid">
+                <div>
+                  <label htmlFor="meeting-start">Start time</label>
+                  <input
+                    id="meeting-start"
+                    type="datetime-local"
+                    value={newMeetingStartsAt}
+                    onChange={(event) => onNewMeetingStartsAtChange(event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="meeting-end">End time</label>
+                  <input
+                    id="meeting-end"
+                    type="datetime-local"
+                    value={newMeetingEndsAt}
+                    onChange={(event) => onNewMeetingEndsAtChange(event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="meeting-dialog-actions">
+                <button type="button" onClick={onCancelMeetingForm}>
+                  Cancel
+                </button>
+                <button type="submit">Create meeting</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -1186,6 +1430,46 @@ function formatBytes(sizeBytes: number) {
   return `${mib.toFixed(mib >= 10 ? 0 : 1)} MiB`
 }
 
+function formatMeetingDay(value: string) {
+  const date = parseMeetingDate(value)
+  if (!date) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
+
+function formatMeetingClock(startsAt: string, endsAt: string) {
+  const start = parseMeetingDate(startsAt)
+  const end = parseMeetingDate(endsAt)
+  if (!start || !end) {
+    return `${startsAt} - ${endsAt}`
+  }
+
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `${formatter.format(start)} - ${formatter.format(end)}`
+}
+
+function meetingChannelName(meeting: CalendarMeeting, channels: Channel[]) {
+  const channel = channels.find((candidate) => candidate.id === meeting.channelId)
+  if (!channel) {
+    return 'Workspace'
+  }
+
+  return `${channel.kind === 'voice' ? 'Voice' : '#'} ${displayChannelName(channel.name)}`
+}
+
+function parseMeetingDate(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
 function safeRealtimeURL(serverURL: string) {
   try {
     return realtimeUrlForServer(serverURL)
@@ -1216,6 +1500,10 @@ function normalizeChannelName(name: string) {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
+}
+
+function slugForMeetingTitle(title: string) {
+  return normalizeChannelName(title) || 'meeting'
 }
 
 function displayChannelName(name: string) {
