@@ -13,6 +13,9 @@ importers:
       '@opencord/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@opencord/realtime':
+        specifier: workspace:*
+        version: link:../../packages/realtime
       react:
         specifier: ^19.2.7
         version: 19.2.7
