@@ -10,16 +10,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/selfhostanything/opencord-clients.git"
+    "url": "git+https://github.com/selfhostanything/opencord.git"
   },
   "keywords": [],
   "author": "",
   "license": "Apache-2.0",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/selfhostanything/opencord-clients/issues"
+    "url": "https://github.com/selfhostanything/opencord/issues"
   },
-  "homepage": "https://github.com/selfhostanything/opencord-clients#readme",
+  "homepage": "https://github.com/selfhostanything/opencord#readme",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

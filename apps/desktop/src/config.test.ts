@@ -13,7 +13,7 @@ describe('desktop shell config', () => {
     expect(
       resolveRendererEntry({
         env: { OPENCORD_DESKTOP_RENDERER_URL: 'http://127.0.0.1:5173/' },
-        repoRoot: '/workspace/opencord-clients',
+        repoRoot: '/workspace/opencord',
       }),
     ).toEqual({
       kind: 'url',
@@ -22,9 +22,9 @@ describe('desktop shell config', () => {
   })
 
   it('falls back to the built web renderer file', () => {
-    expect(resolveRendererEntry({ env: {}, repoRoot: '/workspace/opencord-clients' })).toEqual({
+    expect(resolveRendererEntry({ env: {}, repoRoot: '/workspace/opencord' })).toEqual({
       kind: 'file',
-      value: path.join('/workspace/opencord-clients', 'apps/web/dist/index.html'),
+      value: path.join('/workspace/opencord', 'apps/web/dist/index.html'),
     })
   })
 

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rules for agents working in `opencord-clients`.
+Rules for agents working in `opencord`.
 
 - Use Node.js 26 through `fnm` before running package commands.
 - Use `pnpm` for installs, dependency updates, tests, and builds.
