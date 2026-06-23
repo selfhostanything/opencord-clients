@@ -35,6 +35,7 @@ type Space = {
 type Channel = {
   id: string
   spaceId: string
+  kind: 'text' | 'voice'
   name: string
   topic: string
   category: string
@@ -70,6 +71,21 @@ type Member = {
   presence: 'online' | 'idle' | 'offline'
 }
 
+type VoiceParticipant = {
+  id: string
+  channelId: string
+  name: string
+  status: 'connected' | 'speaking' | 'muted' | 'deafened'
+  self?: boolean
+}
+
+type VoiceState = {
+  connectedChannelId: string | null
+  selfMute: boolean
+  selfDeaf: boolean
+  participants: VoiceParticipant[]
+}
+
 const initialSpaces: Space[] = [
   { id: 'opencord', name: 'OpenCord', initials: 'OC', unread: true, mentions: 2 },
   { id: 'platform', name: 'Platform', initials: 'PF', unread: false, mentions: 0 },
@@ -80,6 +96,7 @@ const initialChannels: Channel[] = [
   {
     id: 'general',
     spaceId: 'opencord',
+    kind: 'text',
     name: 'general',
     topic: 'Daily product coordination and chat core development.',
     category: 'Text channels',
@@ -90,6 +107,7 @@ const initialChannels: Channel[] = [
   {
     id: 'announcements',
     spaceId: 'opencord',
+    kind: 'text',
     name: 'announcements',
     topic: 'Read-only release notes and operational notices.',
     category: 'Text channels',
@@ -100,6 +118,7 @@ const initialChannels: Channel[] = [
   {
     id: 'backend',
     spaceId: 'opencord',
+    kind: 'text',
     name: 'backend',
     topic: 'Rust API, permissions, realtime, and storage.',
     category: 'Engineering',
@@ -110,12 +129,35 @@ const initialChannels: Channel[] = [
   {
     id: 'moderators',
     spaceId: 'opencord',
+    kind: 'text',
     name: 'moderators',
     topic: 'Private review queue for permission and abuse handling.',
     category: 'Engineering',
     canSend: true,
     unread: false,
     private: true,
+  },
+  {
+    id: 'standup',
+    spaceId: 'opencord',
+    kind: 'voice',
+    name: 'standup',
+    topic: 'Daily planning voice channel.',
+    category: 'Voice channels',
+    canSend: false,
+    unread: false,
+    private: false,
+  },
+  {
+    id: 'office-hours',
+    spaceId: 'opencord',
+    kind: 'voice',
+    name: 'office-hours',
+    topic: 'Drop-in support and pair debugging.',
+    category: 'Voice channels',
+    canSend: false,
+    unread: false,
+    private: false,
   },
 ]
 
@@ -170,6 +212,18 @@ const members: Member[] = [
   { id: 'u5', name: 'Nok', role: 'Engineering', presence: 'offline' },
 ]
 
+const initialVoiceState: VoiceState = {
+  connectedChannelId: 'standup',
+  selfMute: false,
+  selfDeaf: false,
+  participants: [
+    { id: 'u1', channelId: 'standup', name: 'Thanet', status: 'speaking' },
+    { id: 'u2', channelId: 'standup', name: 'You', status: 'connected', self: true },
+    { id: 'u3', channelId: 'standup', name: 'Mira', status: 'muted' },
+    { id: 'u4', channelId: 'office-hours', name: 'Alex', status: 'connected' },
+  ],
+}
+
 export default function App() {
   const [serverConnections, setServerConnections] = useState(() =>
     loadBrowserServerConnectionState(),
@@ -191,6 +245,7 @@ export default function App() {
   const [showChannelForm, setShowChannelForm] = useState(false)
   const [newChannelName, setNewChannelName] = useState('')
   const [editingMessage, setEditingMessage] = useState<{ id: string; body: string } | null>(null)
+  const [voiceState, setVoiceState] = useState(initialVoiceState)
 
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0]
   const visibleChannels = channels.filter((channel) => channel.spaceId === selectedSpace.id)
@@ -275,6 +330,7 @@ export default function App() {
     const channel: Channel = {
       id,
       spaceId: selectedSpace.id,
+      kind: 'text',
       name,
       topic: 'New channel created locally. API persistence comes next.',
       category: 'Text channels',
@@ -354,6 +410,81 @@ export default function App() {
 
   function deleteMessage(messageId: string) {
     setMessages((current) => current.filter((message) => message.id !== messageId))
+  }
+
+  function joinVoiceChannel(channelId: string) {
+    const channel = channels.find((candidate) => candidate.id === channelId)
+    if (channel?.kind !== 'voice') {
+      return
+    }
+
+    setVoiceState((current) => {
+      const withoutSelf = current.participants.filter((participant) => !participant.self)
+
+      return {
+        ...current,
+        connectedChannelId: channelId,
+        participants: [
+          ...withoutSelf,
+          {
+            id: 'u2',
+            channelId,
+            name: 'You',
+            status: current.selfDeaf ? 'deafened' : current.selfMute ? 'muted' : 'connected',
+            self: true,
+          },
+        ],
+      }
+    })
+  }
+
+  function disconnectVoice() {
+    setVoiceState((current) => ({
+      ...current,
+      connectedChannelId: null,
+      selfMute: false,
+      selfDeaf: false,
+      participants: current.participants.filter((participant) => !participant.self),
+    }))
+  }
+
+  function toggleSelfMute() {
+    setVoiceState((current) => {
+      const selfMute = !current.selfMute
+
+      return {
+        ...current,
+        selfMute,
+        participants: current.participants.map((participant) =>
+          participant.self
+            ? {
+                ...participant,
+                status: current.selfDeaf ? 'deafened' : selfMute ? 'muted' : 'connected',
+              }
+            : participant,
+        ),
+      }
+    })
+  }
+
+  function toggleSelfDeaf() {
+    setVoiceState((current) => {
+      const selfDeaf = !current.selfDeaf
+
+      return {
+        ...current,
+        selfDeaf,
+        selfMute: selfDeaf ? true : current.selfMute,
+        participants: current.participants.map((participant) =>
+          participant.self
+            ? {
+                ...participant,
+                status: selfDeaf ? 'deafened' : current.selfMute ? 'muted' : 'connected',
+              }
+            : participant,
+        ),
+      }
+    })
   }
 
   return (
@@ -474,21 +605,26 @@ export default function App() {
             <section key={category} className="channel-group">
               <h2>{category}</h2>
               {categoryChannels.map((channel) => (
-                <button
+                <ChannelNavigationRow
                   key={channel.id}
-                  className={`channel-row ${channel.id === selectedChannel.id ? 'is-selected' : ''}`}
-                  type="button"
-                  aria-label={`# ${channel.name}`}
-                  onClick={() => setSelectedChannelId(channel.id)}
-                >
-                  <span aria-hidden="true">#</span>
-                  <span>{channel.name}</span>
-                  {channel.unread ? <i aria-hidden="true" /> : null}
-                </button>
+                  channel={channel}
+                  selectedChannelId={selectedChannel.id}
+                  voiceState={voiceState}
+                  onSelectTextChannel={setSelectedChannelId}
+                  onJoinVoice={joinVoiceChannel}
+                />
               ))}
             </section>
           ))}
         </div>
+
+        <VoiceControls
+          channels={channels}
+          voiceState={voiceState}
+          onToggleMute={toggleSelfMute}
+          onToggleDeaf={toggleSelfDeaf}
+          onDisconnect={disconnectVoice}
+        />
 
         <div className="user-footer">
           <div className="avatar">Y</div>
@@ -679,6 +815,165 @@ function StatusBadge({ health }: { health: HealthState }) {
   )
 }
 
+function ChannelNavigationRow({
+  channel,
+  selectedChannelId,
+  voiceState,
+  onSelectTextChannel,
+  onJoinVoice,
+}: {
+  channel: Channel
+  selectedChannelId: string
+  voiceState: VoiceState
+  onSelectTextChannel: (channelId: string) => void
+  onJoinVoice: (channelId: string) => void
+}) {
+  if (channel.kind === 'voice') {
+    const voiceChannelName = displayChannelName(channel.name)
+    const isConnected = voiceState.connectedChannelId === channel.id
+    const participants = voiceParticipantsForChannel(voiceState, channel.id)
+
+    return (
+      <div className={`voice-channel-card ${isConnected ? 'is-connected' : ''}`}>
+        <div className="voice-channel-header">
+          <button
+            className="voice-channel-button"
+            type="button"
+            aria-label={`Voice: ${voiceChannelName}`}
+            onClick={() => onJoinVoice(channel.id)}
+          >
+            <span aria-hidden="true">V</span>
+            <span>{voiceChannelName}</span>
+          </button>
+          <button
+            className="voice-join-button"
+            type="button"
+            aria-label={`Join Voice: ${voiceChannelName}`}
+            onClick={() => onJoinVoice(channel.id)}
+          >
+            {isConnected ? 'Joined' : 'Join'}
+          </button>
+        </div>
+        {participants.length > 0 ? (
+          <VoiceParticipantList
+            participants={participants}
+            voiceState={voiceState}
+            current={isConnected}
+          />
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <button
+      className={`channel-row ${channel.id === selectedChannelId ? 'is-selected' : ''}`}
+      type="button"
+      aria-label={`# ${channel.name}`}
+      onClick={() => onSelectTextChannel(channel.id)}
+    >
+      <span aria-hidden="true">#</span>
+      <span>{channel.name}</span>
+      {channel.unread ? <i aria-hidden="true" /> : null}
+    </button>
+  )
+}
+
+function VoiceParticipantList({
+  participants,
+  voiceState,
+  current,
+}: {
+  participants: VoiceParticipant[]
+  voiceState: VoiceState
+  current: boolean
+}) {
+  return (
+    <div
+      className="voice-participants"
+      aria-label={current ? 'Current voice participants' : undefined}
+    >
+      {participants.map((participant) => {
+        const status = voiceParticipantStatus(participant, voiceState)
+
+        return (
+          <div
+            key={participant.id}
+            className={`voice-participant-row is-${status}`}
+            aria-label={`${participant.name} ${status}`}
+          >
+            <span className="voice-user-avatar" aria-hidden="true">
+              {initialsFor(participant.name)}
+            </span>
+            <span>{participant.name}</span>
+            <em>{status}</em>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function VoiceControls({
+  channels,
+  voiceState,
+  onToggleMute,
+  onToggleDeaf,
+  onDisconnect,
+}: {
+  channels: Channel[]
+  voiceState: VoiceState
+  onToggleMute: () => void
+  onToggleDeaf: () => void
+  onDisconnect: () => void
+}) {
+  const activeChannel = channels.find((channel) => channel.id === voiceState.connectedChannelId)
+  const isConnected = activeChannel?.kind === 'voice'
+  const activeParticipants = isConnected
+    ? voiceParticipantsForChannel(voiceState, activeChannel.id)
+    : []
+
+  return (
+    <section className="voice-controls" aria-label="Voice controls">
+      <div className="voice-controls-status">
+        <strong>{isConnected ? 'Voice connected' : 'Not connected'}</strong>
+        <span>{isConnected ? displayChannelName(activeChannel.name) : 'Join a voice channel'}</span>
+        {activeParticipants.length > 0 ? (
+          <span className="voice-controls-participants">
+            {activeParticipants.map((participant) => participant.name).join(', ')}
+          </span>
+        ) : null}
+      </div>
+      <div className="voice-control-buttons">
+        <button
+          type="button"
+          aria-label={voiceState.selfMute ? 'Unmute microphone' : 'Mute microphone'}
+          disabled={!isConnected}
+          onClick={onToggleMute}
+        >
+          {voiceState.selfMute ? 'Unmute' : 'Mute'}
+        </button>
+        <button
+          type="button"
+          aria-label={voiceState.selfDeaf ? 'Undeafen audio' : 'Deafen audio'}
+          disabled={!isConnected}
+          onClick={onToggleDeaf}
+        >
+          {voiceState.selfDeaf ? 'Undeaf' : 'Deaf'}
+        </button>
+        <button
+          type="button"
+          aria-label="Disconnect voice"
+          disabled={!isConnected}
+          onClick={onDisconnect}
+        >
+          Leave
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function AttachmentList({ attachments }: { attachments: MessageAttachment[] }) {
   if (attachments.length === 0) {
     return null
@@ -726,6 +1021,32 @@ function groupMembersByRole(memberList: Member[]) {
       return groups
     }, new Map<string, Member[]>()),
   )
+}
+
+function voiceParticipantsForChannel(voiceState: VoiceState, channelId: string) {
+  return voiceState.participants.filter((participant) => {
+    if (!participant.self) {
+      return participant.channelId === channelId
+    }
+
+    return voiceState.connectedChannelId === channelId && participant.channelId === channelId
+  })
+}
+
+function voiceParticipantStatus(participant: VoiceParticipant, voiceState: VoiceState) {
+  if (!participant.self) {
+    return participant.status
+  }
+
+  if (voiceState.selfDeaf) {
+    return 'deafened'
+  }
+
+  if (voiceState.selfMute) {
+    return 'muted'
+  }
+
+  return 'connected'
 }
 
 function imagePreviewUrl(file: File) {
@@ -780,6 +1101,13 @@ function normalizeChannelName(name: string) {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
+}
+
+function displayChannelName(name: string) {
+  return name
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 function initialsFor(name: string) {

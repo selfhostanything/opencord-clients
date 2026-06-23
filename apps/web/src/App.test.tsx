@@ -124,6 +124,50 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
   })
 
+  it('shows voice channels with connected users and local controls', async () => {
+    render(<App />)
+
+    const navigation = screen.getByRole('navigation', { name: 'Channel navigation' })
+    expect(within(navigation).getByText('Voice channels')).toBeInTheDocument()
+    expect(within(navigation).getByRole('button', { name: 'Voice: Standup' })).toBeInTheDocument()
+    const currentVoice = screen.getByLabelText('Current voice participants')
+    expect(within(currentVoice).getByLabelText('Thanet speaking')).toBeInTheDocument()
+    expect(within(currentVoice).getByLabelText('You connected')).toBeInTheDocument()
+
+    const voiceControls = screen.getByLabelText('Voice controls')
+    expect(within(voiceControls).getByText('Voice connected')).toBeInTheDocument()
+    expect(within(voiceControls).getByText('Standup')).toBeInTheDocument()
+    expect(within(voiceControls).getByRole('button', { name: 'Mute microphone' })).toBeInTheDocument()
+    expect(within(voiceControls).getByRole('button', { name: 'Deafen audio' })).toBeInTheDocument()
+    expect(within(voiceControls).getByRole('button', { name: 'Disconnect voice' })).toBeInTheDocument()
+  })
+
+  it('updates local voice controls and switches voice channels', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Mute microphone' }))
+    expect(screen.getByRole('button', { name: 'Unmute microphone' })).toBeInTheDocument()
+    expect(
+      within(screen.getByLabelText('Current voice participants')).getByLabelText('You muted'),
+    ).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Deafen audio' }))
+    expect(screen.getByRole('button', { name: 'Undeafen audio' })).toBeInTheDocument()
+    expect(
+      within(screen.getByLabelText('Current voice participants')).getByLabelText('You deafened'),
+    ).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Join Voice: Office Hours' }))
+    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Office Hours')
+    expect(
+      within(screen.getByLabelText('Current voice participants')).getByLabelText('You deafened'),
+    ).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Disconnect voice' }))
+    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Not connected')
+    expect(screen.getByRole('button', { name: 'Join Voice: Standup' })).toBeInTheDocument()
+  })
+
   it('adds, switches, removes, and persists multiple server connections', async () => {
     render(<App />)
 

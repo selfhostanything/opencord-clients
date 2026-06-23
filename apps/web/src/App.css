@@ -29,13 +29,16 @@ button {
 }
 
 .app-shell {
+  height: 100vh;
   min-height: 100vh;
   display: grid;
   grid-template-columns: 72px 280px minmax(0, 1fr) 248px;
+  overflow: hidden;
   background: #151515;
 }
 
 .space-rail {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -109,8 +112,11 @@ button {
 
 .channel-sidebar {
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: #202020;
   border-right: 1px solid #303030;
 }
@@ -226,7 +232,10 @@ button {
 .message-actions button,
 .header-actions button,
 .user-footer button,
-.server-connection-row button {
+.server-connection-row button,
+.voice-channel-button,
+.voice-join-button,
+.voice-control-buttons button {
   border: 0;
   border-radius: 6px;
   color: #ffffff;
@@ -317,6 +326,7 @@ button {
 }
 
 .channel-groups {
+  flex: 1;
   min-height: 0;
   overflow: auto;
   padding: 4px 10px 16px;
@@ -366,13 +376,171 @@ button {
   background: #f0c35a;
 }
 
+.voice-channel-card {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+
+.voice-channel-card.is-connected {
+  padding-bottom: 6px;
+  border-bottom: 1px solid #303030;
+}
+
+.voice-channel-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-channel-button {
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  color: #b9beb5;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.voice-channel-button:hover,
+.voice-channel-card.is-connected .voice-channel-button {
+  color: #ffffff;
+  background: #333333;
+}
+
+.voice-channel-button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-join-button {
+  min-width: 54px;
+  min-height: 30px;
+  padding: 0 8px;
+  background: #243d38;
+  color: #b8edd5;
+}
+
+.voice-channel-card.is-connected .voice-join-button {
+  background: #333333;
+  color: #d6dcd2;
+}
+
+.voice-participants {
+  display: grid;
+  gap: 2px;
+  padding-left: 24px;
+}
+
+.voice-participant-row {
+  min-width: 0;
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 6px 2px 0;
+  color: #c8cdc5;
+  font-size: 13px;
+}
+
+.voice-participant-row span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-participant-row em {
+  color: #9ea49b;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.voice-participant-row.is-speaking em {
+  color: #86e0bb;
+}
+
+.voice-participant-row.is-muted em,
+.voice-participant-row.is-deafened em {
+  color: #f0c35a;
+}
+
+.voice-user-avatar {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #343434;
+  color: #f2f4f1;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.voice-controls {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid #303030;
+  background: #1b211f;
+}
+
+.voice-controls-status strong {
+  display: block;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.voice-controls-status span {
+  display: block;
+  margin-top: 3px;
+  color: #9ea49b;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.voice-controls-status .voice-controls-participants {
+  overflow: hidden;
+  color: #d8ddd5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-control-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.voice-control-buttons button {
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  background: #2b2b2b;
+  color: #d7ddd4;
+}
+
+.voice-control-buttons button:disabled {
+  cursor: not-allowed;
+  color: #6d746b;
+  background: #252525;
+}
+
 .user-footer {
   min-height: 62px;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  margin-top: auto;
   padding: 12px 14px;
   background: #191919;
   border-top: 1px solid #303030;
@@ -402,6 +570,7 @@ button {
 
 .chat-panel {
   min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   background: #272727;
@@ -692,6 +861,8 @@ button {
 
 .members-panel {
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
   background: #202020;
   border-left: 1px solid #303030;
 }
@@ -743,7 +914,9 @@ button {
 
 @media (max-width: 760px) {
   .app-shell {
+    height: auto;
     grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .space-rail {
@@ -765,9 +938,25 @@ button {
   }
 
   .channel-sidebar {
-    max-height: 360px;
+    height: auto;
+    max-height: none;
     border-right: 0;
     border-bottom: 1px solid #303030;
+    overflow: visible;
+  }
+
+  .channel-groups {
+    flex: none;
+    max-height: 280px;
+  }
+
+  .voice-controls {
+    gap: 6px;
+    padding: 8px 14px 6px;
+  }
+
+  .voice-control-buttons button {
+    min-height: 26px;
   }
 
   .chat-panel {
