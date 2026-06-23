@@ -28,6 +28,7 @@ export type MobileAccount = {
 
 export type MobileChannel = {
   id: string
+  kind: 'text' | 'voice'
   name: string
   topic: string
   unread: boolean
@@ -40,6 +41,21 @@ export type MobileMessage = {
   content: string
   time: string
   own: boolean
+}
+
+export type MobileVoiceParticipant = {
+  id: string
+  channelId: string
+  name: string
+  status: 'connected' | 'speaking' | 'muted' | 'deafened'
+  self?: boolean
+}
+
+export type MobileVoiceState = {
+  connectedChannelId: string | null
+  selfMute: boolean
+  selfDeaf: boolean
+  participants: MobileVoiceParticipant[]
 }
 
 export type MobilePushRegistration =
@@ -62,6 +78,7 @@ export type MobileAppState = {
   messages: MobileMessage[]
   realtimeStatus: RealtimeConnectionStatus
   pushRegistration: MobilePushRegistration
+  voice: MobileVoiceState
 }
 
 export type MobileAction =
@@ -71,6 +88,10 @@ export type MobileAction =
   | { type: 'channel.back' }
   | { type: 'message.send'; content: string }
   | { type: 'realtime.message_created'; envelope: RealtimeIncomingEnvelope }
+  | { type: 'voice.join'; channelId: string }
+  | { type: 'voice.leave' }
+  | { type: 'voice.toggle_mute' }
+  | { type: 'voice.toggle_deaf' }
   | { type: 'push.registered'; pushToken: PushToken }
   | { type: 'push.failed'; message: string }
   | {
@@ -87,20 +108,37 @@ export type MobileAction =
 const initialChannels: MobileChannel[] = [
   {
     id: 'general',
+    kind: 'text',
     name: 'general',
     topic: 'Company-wide chat and daily updates.',
     unread: true,
   },
   {
     id: 'backend',
+    kind: 'text',
     name: 'backend',
     topic: 'API, realtime, permissions, and deployment work.',
     unread: false,
   },
   {
     id: 'announcements',
+    kind: 'text',
     name: 'announcements',
     topic: 'Read-only release notes and notices.',
+    unread: false,
+  },
+  {
+    id: 'standup',
+    kind: 'voice',
+    name: 'standup',
+    topic: 'Daily mobile voice check-in.',
+    unread: false,
+  },
+  {
+    id: 'office-hours',
+    kind: 'voice',
+    name: 'office-hours',
+    topic: 'Drop-in support voice room.',
     unread: false,
   },
 ]
@@ -124,6 +162,16 @@ const initialMessages: MobileMessage[] = [
   },
 ]
 
+const initialVoiceState: MobileVoiceState = {
+  connectedChannelId: null,
+  selfMute: false,
+  selfDeaf: false,
+  participants: [
+    { id: 'voice-u1', channelId: 'standup', name: 'Mira', status: 'speaking' },
+    { id: 'voice-u2', channelId: 'office-hours', name: 'Thanet', status: 'connected' },
+  ],
+}
+
 export function createInitialMobileState(): MobileAppState {
   const serverConnections = createDefaultServerConnectionState()
   const activeConnection = activeServerConnection(serverConnections)
@@ -138,6 +186,7 @@ export function createInitialMobileState(): MobileAppState {
     messages: initialMessages,
     realtimeStatus: INITIAL_REALTIME_STATUS,
     pushRegistration: { status: 'idle' },
+    voice: initialVoiceState,
   }
 }
 
@@ -222,6 +271,82 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
         ),
       }
     }
+    case 'voice.join': {
+      const channel = state.channels.find((candidate) => candidate.id === action.channelId)
+      if (channel?.kind !== 'voice') {
+        return state
+      }
+
+      return {
+        ...state,
+        voice: {
+          ...state.voice,
+          connectedChannelId: channel.id,
+          participants: [
+            ...state.voice.participants.filter((participant) => !participant.self),
+            {
+              id: 'voice-self',
+              channelId: channel.id,
+              name: 'You',
+              status: mobileSelfVoiceStatus({
+                selfDeaf: state.voice.selfDeaf,
+                selfMute: state.voice.selfMute,
+              }),
+              self: true,
+            },
+          ],
+        },
+      }
+    }
+    case 'voice.leave':
+      return {
+        ...state,
+        voice: {
+          ...state.voice,
+          connectedChannelId: null,
+          selfMute: false,
+          selfDeaf: false,
+          participants: state.voice.participants.filter((participant) => !participant.self),
+        },
+      }
+    case 'voice.toggle_mute': {
+      if (!state.voice.connectedChannelId) {
+        return state
+      }
+      const selfMute = !state.voice.selfMute
+
+      return {
+        ...state,
+        voice: {
+          ...state.voice,
+          selfMute,
+          participants: updateMobileSelfVoiceStatus(state.voice, {
+            selfDeaf: state.voice.selfDeaf,
+            selfMute,
+          }),
+        },
+      }
+    }
+    case 'voice.toggle_deaf': {
+      if (!state.voice.connectedChannelId) {
+        return state
+      }
+      const selfDeaf = !state.voice.selfDeaf
+      const selfMute = selfDeaf ? true : state.voice.selfMute
+
+      return {
+        ...state,
+        voice: {
+          ...state.voice,
+          selfDeaf,
+          selfMute,
+          participants: updateMobileSelfVoiceStatus(state.voice, {
+            selfDeaf,
+            selfMute,
+          }),
+        },
+      }
+    }
     case 'push.registered':
       return {
         ...state,
@@ -301,6 +426,31 @@ export function messagesForChannel(state: MobileAppState, channelId = state.sele
   return state.messages.filter((message) => message.channelId === channelId)
 }
 
+export function mobileVoiceParticipantsForChannel(
+  state: MobileAppState,
+  channelId = state.voice.connectedChannelId,
+) {
+  if (!channelId) {
+    return []
+  }
+
+  return state.voice.participants.filter((participant) => {
+    if (!participant.self) {
+      return participant.channelId === channelId
+    }
+
+    return state.voice.connectedChannelId === channelId && participant.channelId === channelId
+  })
+}
+
+export function mobileCanListenToVoice(state: MobileAppState) {
+  return Boolean(state.voice.connectedChannelId && !state.voice.selfDeaf)
+}
+
+export function mobileCanSpeakInVoice(state: MobileAppState) {
+  return Boolean(state.voice.connectedChannelId && !state.voice.selfMute && !state.voice.selfDeaf)
+}
+
 export function selectedChannel(state: MobileAppState) {
   return (
     state.channels.find((channel) => channel.id === state.selectedChannelId) ?? state.channels[0]
@@ -313,6 +463,44 @@ export function activeMobileServerConnection(state: MobileAppState) {
 
 function displayNameForEmail(email: string) {
   return email.split('@')[0] || 'OpenCord user'
+}
+
+function updateMobileSelfVoiceStatus(
+  voice: MobileVoiceState,
+  {
+    selfDeaf,
+    selfMute,
+  }: {
+    selfDeaf: boolean
+    selfMute: boolean
+  },
+): MobileVoiceParticipant[] {
+  return voice.participants.map((participant) =>
+    participant.self
+      ? {
+          ...participant,
+          status: mobileSelfVoiceStatus({ selfDeaf, selfMute }),
+        }
+      : participant,
+  )
+}
+
+function mobileSelfVoiceStatus({
+  selfDeaf,
+  selfMute,
+}: {
+  selfDeaf: boolean
+  selfMute: boolean
+}): MobileVoiceParticipant['status'] {
+  if (selfDeaf) {
+    return 'deafened'
+  }
+
+  if (selfMute) {
+    return 'muted'
+  }
+
+  return 'connected'
 }
 
 function messageFromRealtimeEnvelope(envelope: RealtimeIncomingEnvelope): MobileMessage | null {

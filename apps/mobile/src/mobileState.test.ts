@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest'
 import {
   activeMobileServerConnection,
   createInitialMobileState,
+  mobileCanListenToVoice,
+  mobileCanSpeakInVoice,
   mobileReducer,
   mobilePushTokenRequest,
+  mobileVoiceParticipantsForChannel,
 } from './mobileState'
 
 describe('mobile app state', () => {
@@ -223,5 +226,57 @@ describe('mobile app state', () => {
     ])
     expect(activeMobileServerConnection(removed)?.displayName).toBe('Local OpenCord')
     expect(removed.serverUrl).toBe('http://localhost:8080')
+  })
+
+  it('joins a mobile voice channel and tracks local listen/speak capability', () => {
+    const state = mobileReducer(createInitialMobileState(), {
+      type: 'voice.join',
+      channelId: 'standup',
+    })
+
+    expect(state.voice.connectedChannelId).toBe('standup')
+    expect(mobileVoiceParticipantsForChannel(state, 'standup').map((participant) => participant.name)).toContain(
+      'You',
+    )
+    expect(mobileCanListenToVoice(state)).toBe(true)
+    expect(mobileCanSpeakInVoice(state)).toBe(true)
+  })
+
+  it('mutes and deafens the local mobile voice participant', () => {
+    const joined = mobileReducer(createInitialMobileState(), {
+      type: 'voice.join',
+      channelId: 'standup',
+    })
+    const muted = mobileReducer(joined, { type: 'voice.toggle_mute' })
+    const deafened = mobileReducer(muted, { type: 'voice.toggle_deaf' })
+
+    expect(muted.voice.selfMute).toBe(true)
+    expect(mobileCanListenToVoice(muted)).toBe(true)
+    expect(mobileCanSpeakInVoice(muted)).toBe(false)
+    expect(deafened.voice.selfDeaf).toBe(true)
+    expect(deafened.voice.selfMute).toBe(true)
+    expect(mobileCanListenToVoice(deafened)).toBe(false)
+    expect(mobileCanSpeakInVoice(deafened)).toBe(false)
+  })
+
+  it('leaves mobile voice and rejects non-voice channel joins', () => {
+    const initial = createInitialMobileState()
+    const rejected = mobileReducer(initial, {
+      type: 'voice.join',
+      channelId: 'general',
+    })
+    const joined = mobileReducer(initial, {
+      type: 'voice.join',
+      channelId: 'standup',
+    })
+    const left = mobileReducer(joined, { type: 'voice.leave' })
+
+    expect(rejected.voice.connectedChannelId).toBeNull()
+    expect(left.voice.connectedChannelId).toBeNull()
+    expect(left.voice.selfMute).toBe(false)
+    expect(left.voice.selfDeaf).toBe(false)
+    expect(mobileVoiceParticipantsForChannel(left, 'standup').map((participant) => participant.name)).not.toContain(
+      'You',
+    )
   })
 })

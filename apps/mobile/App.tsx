@@ -12,11 +12,15 @@ import {
 import {
   activeMobileServerConnection,
   createInitialMobileState,
+  mobileCanListenToVoice,
+  mobileCanSpeakInVoice,
   messagesForChannel,
   mobileReducer,
+  mobileVoiceParticipantsForChannel,
   selectedChannel,
   type MobileChannel,
   type MobileMessage,
+  type MobileVoiceParticipant,
 } from './src/mobileState'
 
 export default function App() {
@@ -27,6 +31,10 @@ export default function App() {
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
   const visibleMessages = useMemo(() => messagesForChannel(state), [state])
+  const activeVoiceChannel = state.channels.find(
+    (channel) => channel.id === state.voice.connectedChannelId,
+  )
+  const voiceParticipants = useMemo(() => mobileVoiceParticipantsForChannel(state), [state])
 
   useEffect(() => {
     setServerUrl(state.serverUrl)
@@ -119,10 +127,29 @@ export default function App() {
           renderItem={({ item }) => (
             <ChannelRow
               channel={item}
-              onPress={() => dispatch({ type: 'channel.select', channelId: item.id })}
+              connected={state.voice.connectedChannelId === item.id}
+              onPress={() => {
+                if (item.kind === 'voice') {
+                  dispatch({ type: 'voice.join', channelId: item.id })
+                  return
+                }
+
+                dispatch({ type: 'channel.select', channelId: item.id })
+              }}
             />
           )}
           contentContainerStyle={styles.listContent}
+        />
+        <MobileVoiceTray
+          channelName={activeVoiceChannel?.name}
+          canListen={mobileCanListenToVoice(state)}
+          canSpeak={mobileCanSpeakInVoice(state)}
+          participants={voiceParticipants}
+          selfDeaf={state.voice.selfDeaf}
+          selfMute={state.voice.selfMute}
+          onLeave={() => dispatch({ type: 'voice.leave' })}
+          onToggleDeaf={() => dispatch({ type: 'voice.toggle_deaf' })}
+          onToggleMute={() => dispatch({ type: 'voice.toggle_mute' })}
         />
       </SafeAreaView>
     )
@@ -145,6 +172,17 @@ export default function App() {
         renderItem={({ item }) => <MessageBubble message={item} />}
         contentContainerStyle={styles.timeline}
       />
+      <MobileVoiceTray
+        channelName={activeVoiceChannel?.name}
+        canListen={mobileCanListenToVoice(state)}
+        canSpeak={mobileCanSpeakInVoice(state)}
+        participants={voiceParticipants}
+        selfDeaf={state.voice.selfDeaf}
+        selfMute={state.voice.selfMute}
+        onLeave={() => dispatch({ type: 'voice.leave' })}
+        onToggleDeaf={() => dispatch({ type: 'voice.toggle_deaf' })}
+        onToggleMute={() => dispatch({ type: 'voice.toggle_mute' })}
+      />
       <View style={styles.composer}>
         <TextInput
           accessibilityLabel="Message composer"
@@ -162,16 +200,96 @@ export default function App() {
   )
 }
 
-function ChannelRow({ channel, onPress }: { channel: MobileChannel; onPress: () => void }) {
+function ChannelRow({
+  channel,
+  connected,
+  onPress,
+}: {
+  channel: MobileChannel
+  connected: boolean
+  onPress: () => void
+}) {
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.channelRow}>
       <View>
-        <Text style={styles.channelName}># {channel.name}</Text>
+        <Text style={styles.channelName}>
+          {channel.kind === 'voice' ? 'V' : '#'} {channel.name}
+        </Text>
         <Text style={styles.subtle}>{channel.topic}</Text>
       </View>
+      {connected ? <Text style={styles.voiceConnectedLabel}>Voice</Text> : null}
       {channel.unread ? <View style={styles.unreadDot} /> : null}
     </Pressable>
   )
+}
+
+function MobileVoiceTray({
+  canListen,
+  canSpeak,
+  channelName,
+  participants,
+  selfDeaf,
+  selfMute,
+  onLeave,
+  onToggleDeaf,
+  onToggleMute,
+}: {
+  canListen: boolean
+  canSpeak: boolean
+  channelName?: string
+  participants: MobileVoiceParticipant[]
+  selfDeaf: boolean
+  selfMute: boolean
+  onLeave: () => void
+  onToggleDeaf: () => void
+  onToggleMute: () => void
+}) {
+  if (!channelName) {
+    return null
+  }
+
+  return (
+    <View style={styles.voiceTray}>
+      <View style={styles.voiceSummary}>
+        <Text style={styles.voiceTitle}>Voice connected</Text>
+        <Text style={styles.subtle}>{channelName}</Text>
+        <Text style={styles.subtle}>
+          {canListen ? 'Listening' : 'Deafened'} / {canSpeak ? 'Speaking' : 'Muted'}
+        </Text>
+      </View>
+      <View style={styles.voiceParticipants}>
+        {participants.map((participant) => (
+          <Text key={participant.id} style={styles.voiceParticipant}>
+            {participant.name} -{' '}
+            {participant.self ? voiceSelfStatus(selfMute, selfDeaf) : participant.status}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.voiceActions}>
+        <Pressable accessibilityRole="button" onPress={onToggleMute} style={styles.voiceButton}>
+          <Text style={styles.primaryButtonText}>{selfMute ? 'Unmute' : 'Mute'}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={onToggleDeaf} style={styles.voiceButton}>
+          <Text style={styles.primaryButtonText}>{selfDeaf ? 'Undeaf' : 'Deaf'}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={onLeave} style={styles.voiceButton}>
+          <Text style={styles.primaryButtonText}>Leave</Text>
+        </Pressable>
+      </View>
+    </View>
+  )
+}
+
+function voiceSelfStatus(selfMute: boolean, selfDeaf: boolean) {
+  if (selfDeaf) {
+    return 'deafened'
+  }
+
+  if (selfMute) {
+    return 'muted'
+  }
+
+  return 'connected'
 }
 
 function MessageBubble({ message }: { message: MobileMessage }) {
@@ -302,6 +420,45 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     height: 10,
     width: 10,
+  },
+  voiceConnectedLabel: {
+    color: '#86e0bb',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  voiceTray: {
+    borderTopColor: '#2b2f2d',
+    borderTopWidth: 1,
+    gap: 10,
+    padding: 12,
+  },
+  voiceSummary: {
+    gap: 2,
+  },
+  voiceTitle: {
+    color: '#f5f6f3',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  voiceParticipants: {
+    gap: 4,
+  },
+  voiceParticipant: {
+    color: '#d8ddd5',
+    fontSize: 13,
+  },
+  voiceActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  voiceButton: {
+    alignItems: 'center',
+    backgroundColor: '#2b2b2b',
+    borderRadius: 8,
+    flex: 1,
+    minHeight: 38,
+    justifyContent: 'center',
   },
   linkText: {
     color: '#86e0bb',

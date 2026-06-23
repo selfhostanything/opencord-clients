@@ -20,7 +20,7 @@ pnpm install
 
 - `apps/web`: React/Vite web client shell with multi-server switching, chat UI, voice controls, and screen share controls.
 - `apps/desktop`: Electron shell placeholder for Phase 02.
-- `apps/mobile`: React Native/Expo shell with mobile chat and connection state.
+- `apps/mobile`: React Native/Expo shell with mobile chat, voice, and connection state.
 
 ## Packages
 
