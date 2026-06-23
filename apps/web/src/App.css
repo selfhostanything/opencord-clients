@@ -654,6 +654,19 @@ button {
   gap: 16px;
 }
 
+.developer-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.developer-toolbar-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+  background: #343434;
+}
+
 .developer-toolbar h2 {
   margin: 0;
   color: #ffffff;
@@ -669,7 +682,7 @@ button {
 
 .developer-form {
   display: grid;
-  grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1.4fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   align-items: end;
   gap: 12px;
   padding: 14px;
@@ -791,6 +804,10 @@ button {
 
 .developer-bot-actions button:first-child {
   background: #4b5fc4;
+}
+
+.developer-webhook-card .developer-token-row + .developer-token-row code {
+  background: #171717;
 }
 
 .calendar-panel {

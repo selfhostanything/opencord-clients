@@ -703,6 +703,145 @@ describe('OpenCord API client', () => {
     )
   })
 
+  it('manages incoming webhooks without exposing list tokens', async () => {
+    const webhookPayload = {
+      id: '01973f83-f22a-73ba-ae76-5a045c52fce1',
+      organization_id: '01973f83-f22a-73ba-ae76-5a045c52fce2',
+      space_id: '01973f83-f22a-73ba-ae76-5a045c52fce3',
+      channel_id: '01973f83-f22a-73ba-ae76-5a045c52fce4',
+      bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fce5',
+      created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fce6',
+      name: 'Release Hook',
+      status: 'active',
+      token_last_four: 'once',
+      created_at: '2026-06-23T09:00:00.000Z',
+    }
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          webhook: {
+            ...webhookPayload,
+            token: 'ocw_shown_once',
+            execute_url:
+              'https://chat.example.com/api/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/ocw_shown_once',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          webhooks: [webhookPayload],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          webhook: {
+            ...webhookPayload,
+            token: 'ocw_rotated_once',
+            token_last_four: 'once',
+            execute_url:
+              'https://chat.example.com/api/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/ocw_rotated_once',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    const expectedWebhook = {
+      id: '01973f83-f22a-73ba-ae76-5a045c52fce1',
+      organizationId: '01973f83-f22a-73ba-ae76-5a045c52fce2',
+      spaceId: '01973f83-f22a-73ba-ae76-5a045c52fce3',
+      channelId: '01973f83-f22a-73ba-ae76-5a045c52fce4',
+      botUserId: '01973f83-f22a-73ba-ae76-5a045c52fce5',
+      createdByUserId: '01973f83-f22a-73ba-ae76-5a045c52fce6',
+      name: 'Release Hook',
+      status: 'active',
+      tokenLastFour: 'once',
+      createdAt: '2026-06-23T09:00:00.000Z',
+    }
+
+    await expect(
+      client.createIncomingWebhook('01973f83-f22a-73ba-ae76-5a045c52fce4', {
+        name: 'Release Hook',
+      }),
+    ).resolves.toEqual({
+      ...expectedWebhook,
+      token: 'ocw_shown_once',
+      executeUrl:
+        'https://chat.example.com/api/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/ocw_shown_once',
+    })
+    await expect(
+      client.listIncomingWebhooks('01973f83-f22a-73ba-ae76-5a045c52fce4'),
+    ).resolves.toEqual([expectedWebhook])
+    await expect(
+      client.rotateIncomingWebhookToken(
+        '01973f83-f22a-73ba-ae76-5a045c52fce4',
+        '01973f83-f22a-73ba-ae76-5a045c52fce1',
+      ),
+    ).resolves.toEqual({
+      ...expectedWebhook,
+      token: 'ocw_rotated_once',
+      executeUrl:
+        'https://chat.example.com/api/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/ocw_rotated_once',
+    })
+    await expect(
+      client.deleteIncomingWebhook(
+        '01973f83-f22a-73ba-ae76-5a045c52fce4',
+        '01973f83-f22a-73ba-ae76-5a045c52fce1',
+      ),
+    ).resolves.toBeUndefined()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://chat.example.com/channels/01973f83-f22a-73ba-ae76-5a045c52fce4/webhooks',
+      {
+        body: JSON.stringify({ name: 'Release Hook' }),
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://chat.example.com/channels/01973f83-f22a-73ba-ae76-5a045c52fce4/webhooks',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://chat.example.com/channels/01973f83-f22a-73ba-ae76-5a045c52fce4/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/token/rotate',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+        method: 'POST',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      'https://chat.example.com/channels/01973f83-f22a-73ba-ae76-5a045c52fce4/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+        method: 'DELETE',
+      },
+    )
+  })
+
   it('resolves meeting join URLs through the typed API', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(

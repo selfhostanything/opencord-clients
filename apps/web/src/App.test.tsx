@@ -417,6 +417,150 @@ describe('OpenCord web chat UI', () => {
     expect(developerSettings).toHaveTextContent('Invited to OpenCord')
   })
 
+  it('manages server incoming webhooks from developer settings', async () => {
+    const channelId = '01973f83-f22a-73ba-ae76-5a045c52fce4'
+    const webhookPayload = {
+      id: '01973f83-f22a-73ba-ae76-5a045c52fce1',
+      organization_id: '01973f83-f22a-73ba-ae76-5a045c52fce2',
+      space_id: '01973f83-f22a-73ba-ae76-5a045c52fce3',
+      channel_id: channelId,
+      bot_user_id: '01973f83-f22a-73ba-ae76-5a045c52fce5',
+      created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fce6',
+      name: 'Release Hook',
+      status: 'active',
+      token_last_four: 'ated',
+      created_at: '2026-06-23T09:00:00.000Z',
+    }
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/healthz')) {
+        return {
+          ok: true,
+          json: async () => ({ status: 'ok', version: 'test-version' }),
+        }
+      }
+
+      if (url.endsWith(`/channels/${channelId}/webhooks`) && init?.method === 'POST') {
+        expect(init).toMatchObject({
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        return {
+          ok: true,
+          json: async () => ({
+            webhook: {
+              ...webhookPayload,
+              token: 'ocw_server_created',
+              execute_url:
+                'http://localhost:8080/api/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/ocw_server_created',
+            },
+          }),
+        }
+      }
+
+      if (url.endsWith(`/channels/${channelId}/webhooks`) && init?.method === undefined) {
+        expect(init).toMatchObject({
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        return {
+          ok: true,
+          json: async () => ({
+            webhooks: [webhookPayload],
+          }),
+        }
+      }
+
+      if (
+        url.endsWith(
+          `/channels/${channelId}/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/token/rotate`,
+        )
+      ) {
+        expect(init).toMatchObject({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        return {
+          ok: true,
+          json: async () => ({
+            webhook: {
+              ...webhookPayload,
+              token: 'ocw_server_rotated',
+              execute_url:
+                'http://localhost:8080/api/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1/ocw_server_rotated',
+            },
+          }),
+        }
+      }
+
+      if (url.endsWith(`/channels/${channelId}/webhooks/01973f83-f22a-73ba-ae76-5a045c52fce1`)) {
+        expect(init).toMatchObject({
+          method: 'DELETE',
+          headers: {
+            Authorization: 'Bearer session-token',
+          },
+        })
+        return {
+          ok: true,
+          status: 204,
+          json: async () => {
+            throw new Error('empty response')
+          },
+        }
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Developer' }))
+
+    const developerSettings = screen.getByRole('region', { name: 'Developer settings' })
+    await userEvent.type(within(developerSettings).getByLabelText('Session token'), 'session-token')
+    await userEvent.type(within(developerSettings).getByLabelText('Webhook channel ID'), channelId)
+    await userEvent.type(within(developerSettings).getByLabelText('Webhook name'), 'Release Hook')
+    await userEvent.click(
+      within(developerSettings).getByRole('button', { name: 'Create incoming webhook' }),
+    )
+
+    const webhooks = within(developerSettings).getByRole('region', {
+      name: 'Incoming webhooks',
+    })
+    await waitFor(() => {
+      expect(webhooks).toHaveTextContent('ocw_server_created')
+    })
+
+    await userEvent.click(
+      within(developerSettings).getByRole('button', { name: 'Load server webhooks' }),
+    )
+    await waitFor(() => {
+      expect(webhooks).toHaveTextContent('Hidden after creation - last 4 ated')
+    })
+
+    await userEvent.click(
+      within(webhooks).getByRole('button', {
+        name: 'Rotate webhook token for Release Hook',
+      }),
+    )
+    await waitFor(() => {
+      expect(webhooks).toHaveTextContent('ocw_server_rotated')
+    })
+
+    await userEvent.click(
+      within(webhooks).getByRole('button', {
+        name: 'Delete webhook Release Hook',
+      }),
+    )
+    await waitFor(() => {
+      expect(webhooks).not.toHaveTextContent('Release Hook')
+    })
+  })
+
   it('opens and leaves a meeting room from the calendar', async () => {
     render(<App />)
 

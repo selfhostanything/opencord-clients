@@ -24,11 +24,20 @@ Typed REST client boundary shared by web, desktop, and mobile clients.
 - `Meeting`
 - `MeetingAttendee`
 - `MeetingReminder`
+- `CreateBotApplicationRequest`
+- `BotApplication`
+- `BotToken`
+- `BotApplicationCreated`
+- `BotApplicationDetail`
+- `CreateIncomingWebhookRequest`
+- `IncomingWebhook`
+- `IncomingWebhookWithToken`
 
 The v1 hand-written SDK covers server health, well-known discovery,
 `/api/version`, `/api/capabilities`, `GET /auth/oidc/providers`,
 `POST /auth/oidc/callback`, `POST /push-tokens`, `GET /push-tokens`,
-`POST /voice/channels/{channel_id}/join`, and `GET /join/{join_slug}`.
+`POST /voice/channels/{channel_id}/join`, `GET /join/{join_slug}`, bot
+application management, and incoming webhook management.
 Future generated OpenAPI clients can live behind this package boundary without
 changing app imports.
 
@@ -60,6 +69,15 @@ Meeting join URLs resolve through the same authenticated client:
 
 ```ts
 const meeting = await client.resolveMeetingJoinUrl(joinSlug)
+```
+
+Incoming webhook management keeps raw tokens shown once:
+
+```ts
+const created = await client.createIncomingWebhook(channelId, { name: 'Deploy Hook' })
+const webhooks = await client.listIncomingWebhooks(channelId)
+const rotated = await client.rotateIncomingWebhookToken(channelId, created.id)
+await client.deleteIncomingWebhook(channelId, rotated.id)
 ```
 
 ## Development

@@ -223,6 +223,28 @@ export type CommandInteraction = {
   respondedAt: string | null
 }
 
+export type CreateIncomingWebhookRequest = {
+  name: string
+}
+
+export type IncomingWebhook = {
+  id: string
+  organizationId: string
+  spaceId: string
+  channelId: string
+  botUserId: string
+  createdByUserId: string
+  name: string
+  status: string
+  tokenLastFour: string
+  createdAt: string
+}
+
+export type IncomingWebhookWithToken = IncomingWebhook & {
+  token: string
+  executeUrl: string
+}
+
 export type OpenCordApiClientOptions = {
   baseUrl?: string
   fetch?: OpenCordFetch
@@ -438,6 +460,29 @@ type CommandInteractionResourcePayload = {
   interaction?: unknown
 }
 
+type IncomingWebhookPayload = {
+  id?: unknown
+  organization_id?: unknown
+  space_id?: unknown
+  channel_id?: unknown
+  bot_user_id?: unknown
+  created_by_user_id?: unknown
+  name?: unknown
+  status?: unknown
+  token_last_four?: unknown
+  token?: unknown
+  execute_url?: unknown
+  created_at?: unknown
+}
+
+type IncomingWebhookResourcePayload = {
+  webhook?: unknown
+}
+
+type IncomingWebhookListPayload = {
+  webhooks?: unknown
+}
+
 type ErrorPayload = {
   error?: {
     message?: unknown
@@ -618,6 +663,56 @@ export class OpenCordApiClient {
     )
 
     return commandInteractionFromPayload(payload.interaction)
+  }
+
+  async createIncomingWebhook(
+    channelId: string,
+    request: CreateIncomingWebhookRequest,
+  ): Promise<IncomingWebhookWithToken> {
+    const payload = await this.requestJson<IncomingWebhookResourcePayload>(
+      `/channels/${encodeURIComponent(channelId)}/webhooks`,
+      {
+        body: JSON.stringify({
+          name: request.name,
+        }),
+        method: 'POST',
+      },
+    )
+
+    return incomingWebhookWithTokenFromPayload(payload.webhook)
+  }
+
+  async listIncomingWebhooks(channelId: string): Promise<IncomingWebhook[]> {
+    const payload = await this.requestJson<IncomingWebhookListPayload>(
+      `/channels/${encodeURIComponent(channelId)}/webhooks`,
+    )
+
+    return arrayValue(payload.webhooks).map(incomingWebhookFromPayload)
+  }
+
+  async rotateIncomingWebhookToken(
+    channelId: string,
+    webhookId: string,
+  ): Promise<IncomingWebhookWithToken> {
+    const payload = await this.requestJson<IncomingWebhookResourcePayload>(
+      `/channels/${encodeURIComponent(channelId)}/webhooks/${encodeURIComponent(
+        webhookId,
+      )}/token/rotate`,
+      {
+        method: 'POST',
+      },
+    )
+
+    return incomingWebhookWithTokenFromPayload(payload.webhook)
+  }
+
+  async deleteIncomingWebhook(channelId: string, webhookId: string): Promise<void> {
+    await this.requestJson<void>(
+      `/channels/${encodeURIComponent(channelId)}/webhooks/${encodeURIComponent(webhookId)}`,
+      {
+        method: 'DELETE',
+      },
+    )
   }
 
   async createBotApplication(
@@ -841,6 +936,33 @@ function commandInteractionFromPayload(value: unknown): CommandInteraction {
     options: arrayValue(payload.options).map(objectValue),
     createdAt: stringValue(payload.created_at, ''),
     respondedAt: nullableStringValue(payload.responded_at),
+  }
+}
+
+function incomingWebhookFromPayload(value: unknown): IncomingWebhook {
+  const payload = objectValue(value) as IncomingWebhookPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    spaceId: stringValue(payload.space_id, ''),
+    channelId: stringValue(payload.channel_id, ''),
+    botUserId: stringValue(payload.bot_user_id, ''),
+    createdByUserId: stringValue(payload.created_by_user_id, ''),
+    name: stringValue(payload.name, ''),
+    status: stringValue(payload.status, 'active'),
+    tokenLastFour: stringValue(payload.token_last_four, ''),
+    createdAt: stringValue(payload.created_at, ''),
+  }
+}
+
+function incomingWebhookWithTokenFromPayload(value: unknown): IncomingWebhookWithToken {
+  const payload = objectValue(value) as IncomingWebhookPayload
+
+  return {
+    ...incomingWebhookFromPayload(payload),
+    token: stringValue(payload.token, ''),
+    executeUrl: stringValue(payload.execute_url, ''),
   }
 }
 

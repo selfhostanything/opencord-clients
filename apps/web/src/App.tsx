@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   createOpenCordApiClient,
+  type IncomingWebhook,
+  type IncomingWebhookWithToken,
   type ServerHealth,
 } from '@opencord/api-client'
 import {
@@ -102,6 +104,16 @@ type DeveloperBot = {
   description: string
   token: string
   invitedSpaceIds: string[]
+  serverManaged?: boolean
+}
+
+type DeveloperWebhook = {
+  id: string
+  channelId: string
+  name: string
+  token: string
+  tokenLastFour: string
+  executeUrl: string
   serverManaged?: boolean
 }
 
@@ -322,12 +334,15 @@ export default function App() {
   const [newMeetingEndsAt, setNewMeetingEndsAt] = useState('2026-06-25T10:30')
   const [meetingRoom, setMeetingRoom] = useState<MeetingRoomState | null>(null)
   const [developerBots, setDeveloperBots] = useState<DeveloperBot[]>([])
+  const [developerWebhooks, setDeveloperWebhooks] = useState<DeveloperWebhook[]>([])
   const [developerSessionToken, setDeveloperSessionToken] = useState('')
   const [developerOrganizationId, setDeveloperOrganizationId] = useState('')
   const [developerSpaceId, setDeveloperSpaceId] = useState('')
+  const [developerChannelId, setDeveloperChannelId] = useState('')
   const [developerError, setDeveloperError] = useState<string | null>(null)
   const [newBotName, setNewBotName] = useState('')
   const [newBotDescription, setNewBotDescription] = useState('')
+  const [newWebhookName, setNewWebhookName] = useState('')
 
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0]
   const visibleChannels = channels.filter((channel) => channel.spaceId === selectedSpace.id)
@@ -442,6 +457,22 @@ export default function App() {
     }
   }
 
+  function developerWebhookContext() {
+    const sessionToken = developerSessionToken.trim()
+    const channelId = developerChannelId.trim()
+    if (!sessionToken || !channelId) {
+      return null
+    }
+
+    return {
+      client: createOpenCordApiClient({
+        baseUrl: activeConnection.baseUrl,
+        sessionToken,
+      }),
+      channelId,
+    }
+  }
+
   async function createDeveloperBot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const name = newBotName.trim()
@@ -491,6 +522,125 @@ export default function App() {
     ])
     setNewBotName('')
     setNewBotDescription('')
+  }
+
+  async function createDeveloperWebhook(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = newWebhookName.trim()
+    if (!name) {
+      return
+    }
+
+    setDeveloperError(null)
+    const context = developerWebhookContext()
+    if (developerSessionToken.trim() && !context) {
+      setDeveloperError('Session token and webhook channel ID are required')
+      return
+    }
+
+    if (context) {
+      try {
+        const created = await context.client.createIncomingWebhook(context.channelId, { name })
+        setDeveloperWebhooks((current) => [
+          ...current.filter((webhook) => webhook.id !== created.id),
+          developerWebhookFromShownToken(created),
+        ])
+        setNewWebhookName('')
+      } catch (error) {
+        setDeveloperError(error instanceof Error ? error.message : 'Unable to create webhook')
+      }
+      return
+    }
+
+    const id = createLocalWebhookId(name)
+    const token = createLocalWebhookToken()
+    setDeveloperWebhooks((current) => [
+      ...current,
+      {
+        id,
+        channelId: selectedChannel.id,
+        name,
+        token,
+        tokenLastFour: token.slice(-4),
+        executeUrl: webhookExecuteURL(activeConnection.baseUrl, id, token),
+      },
+    ])
+    setNewWebhookName('')
+  }
+
+  async function loadDeveloperWebhooksFromServer() {
+    setDeveloperError(null)
+    const context = developerWebhookContext()
+    if (!context) {
+      setDeveloperError('Session token and webhook channel ID are required')
+      return
+    }
+
+    try {
+      const webhooks = await context.client.listIncomingWebhooks(context.channelId)
+      setDeveloperWebhooks(webhooks.map(developerWebhookFromDetail))
+    } catch (error) {
+      setDeveloperError(error instanceof Error ? error.message : 'Unable to load webhooks')
+    }
+  }
+
+  async function rotateDeveloperWebhookToken(webhookId: string) {
+    setDeveloperError(null)
+    const webhook = developerWebhooks.find((candidate) => candidate.id === webhookId)
+    const context = developerWebhookContext()
+    if (webhook?.serverManaged) {
+      if (!context) {
+        setDeveloperError('Session token and webhook channel ID are required')
+        return
+      }
+
+      try {
+        const rotated = await context.client.rotateIncomingWebhookToken(context.channelId, webhook.id)
+        setDeveloperWebhooks((current) =>
+          current.map((candidate) =>
+            candidate.id === webhookId ? developerWebhookFromShownToken(rotated) : candidate,
+          ),
+        )
+      } catch (error) {
+        setDeveloperError(error instanceof Error ? error.message : 'Unable to rotate webhook token')
+      }
+      return
+    }
+
+    const token = createLocalWebhookToken()
+    setDeveloperWebhooks((current) =>
+      current.map((candidate) =>
+        candidate.id === webhookId
+          ? {
+              ...candidate,
+              token,
+              tokenLastFour: token.slice(-4),
+              executeUrl: webhookExecuteURL(activeConnection.baseUrl, candidate.id, token),
+            }
+          : candidate,
+      ),
+    )
+  }
+
+  async function deleteDeveloperWebhook(webhookId: string) {
+    setDeveloperError(null)
+    const webhook = developerWebhooks.find((candidate) => candidate.id === webhookId)
+    const context = developerWebhookContext()
+    if (webhook?.serverManaged) {
+      if (!context) {
+        setDeveloperError('Session token and webhook channel ID are required')
+        return
+      }
+
+      try {
+        await context.client.deleteIncomingWebhook(context.channelId, webhook.id)
+      } catch (error) {
+        setDeveloperError(error instanceof Error ? error.message : 'Unable to delete webhook')
+        return
+      }
+    }
+
+    setDeveloperWebhooks((current) => current.filter((candidate) => candidate.id !== webhookId))
   }
 
   async function loadDeveloperBotsFromServer() {
@@ -1094,21 +1244,31 @@ export default function App() {
             activeConnection={activeConnection}
             bots={developerBots}
             developerError={developerError}
+            developerChannelId={developerChannelId}
             developerOrganizationId={developerOrganizationId}
             developerSessionToken={developerSessionToken}
             developerSpaceId={developerSpaceId}
             newBotDescription={newBotDescription}
             newBotName={newBotName}
+            newWebhookName={newWebhookName}
+            selectedChannel={selectedChannel}
             selectedSpace={selectedSpace}
+            webhooks={developerWebhooks}
             onCreateBot={createDeveloperBot}
+            onCreateWebhook={createDeveloperWebhook}
+            onDeleteWebhook={deleteDeveloperWebhook}
             onInviteBot={inviteDeveloperBotToCurrentSpace}
             onLoadBots={loadDeveloperBotsFromServer}
+            onLoadWebhooks={loadDeveloperWebhooksFromServer}
+            onDeveloperChannelIdChange={setDeveloperChannelId}
             onDeveloperOrganizationIdChange={setDeveloperOrganizationId}
             onDeveloperSessionTokenChange={setDeveloperSessionToken}
             onDeveloperSpaceIdChange={setDeveloperSpaceId}
             onNewBotDescriptionChange={setNewBotDescription}
             onNewBotNameChange={setNewBotName}
+            onNewWebhookNameChange={setNewWebhookName}
             onRotateToken={rotateDeveloperBotToken}
+            onRotateWebhookToken={rotateDeveloperWebhookToken}
           />
         ) : activePanel === 'calendar' ? (
           <CalendarPanel
@@ -1288,45 +1448,68 @@ function DeveloperSettingsPanel({
   activeConnection,
   bots,
   developerError,
+  developerChannelId,
   developerOrganizationId,
   developerSessionToken,
   developerSpaceId,
   newBotDescription,
   newBotName,
+  newWebhookName,
+  selectedChannel,
   selectedSpace,
+  webhooks,
   onCreateBot,
+  onCreateWebhook,
+  onDeleteWebhook,
+  onDeveloperChannelIdChange,
   onDeveloperOrganizationIdChange,
   onDeveloperSessionTokenChange,
   onDeveloperSpaceIdChange,
   onInviteBot,
   onLoadBots,
+  onLoadWebhooks,
   onNewBotDescriptionChange,
   onNewBotNameChange,
+  onNewWebhookNameChange,
   onRotateToken,
+  onRotateWebhookToken,
 }: {
   activeConnection: ServerConnection
   bots: DeveloperBot[]
   developerError: string | null
+  developerChannelId: string
   developerOrganizationId: string
   developerSessionToken: string
   developerSpaceId: string
   newBotDescription: string
   newBotName: string
+  newWebhookName: string
+  selectedChannel: Channel
   selectedSpace: Space
+  webhooks: DeveloperWebhook[]
   onCreateBot: (event: FormEvent<HTMLFormElement>) => void | Promise<void>
+  onCreateWebhook: (event: FormEvent<HTMLFormElement>) => void | Promise<void>
+  onDeleteWebhook: (webhookId: string) => void | Promise<void>
+  onDeveloperChannelIdChange: (value: string) => void
   onDeveloperOrganizationIdChange: (value: string) => void
   onDeveloperSessionTokenChange: (value: string) => void
   onDeveloperSpaceIdChange: (value: string) => void
   onInviteBot: (botId: string) => void | Promise<void>
   onLoadBots: () => void | Promise<void>
+  onLoadWebhooks: () => void | Promise<void>
   onNewBotDescriptionChange: (value: string) => void
   onNewBotNameChange: (value: string) => void
+  onNewWebhookNameChange: (value: string) => void
   onRotateToken: (botId: string) => void | Promise<void>
+  onRotateWebhookToken: (webhookId: string) => void | Promise<void>
 }) {
   const serverBaseURL = activeConnection.baseUrl.replace(/\/+$/g, '')
   const inviteTargetSpaceId = developerSpaceId.trim() || selectedSpace.id
   const botCountText = `${bots.length} bot ${
     bots.length === 1 ? 'application' : 'applications'
+  }`
+  const webhookCountText = `${webhooks.length} incoming ${
+    webhooks.length === 1 ? 'webhook' : 'webhooks'
   }`
 
   return (
@@ -1334,11 +1517,18 @@ function DeveloperSettingsPanel({
       <div className="developer-toolbar">
         <div>
           <h2>Developer settings</h2>
-          <p>{botCountText}</p>
+          <p>
+            {botCountText} · {webhookCountText}
+          </p>
         </div>
-        <button type="button" onClick={onLoadBots}>
-          Load server bots
-        </button>
+        <div className="developer-toolbar-actions">
+          <button type="button" onClick={onLoadBots}>
+            Load server bots
+          </button>
+          <button type="button" onClick={onLoadWebhooks}>
+            Load server webhooks
+          </button>
+        </div>
       </div>
 
       <div className="developer-form" aria-label="Developer server context">
@@ -1365,6 +1555,15 @@ function DeveloperSettingsPanel({
             id="developer-space-id"
             value={developerSpaceId}
             onChange={(event) => onDeveloperSpaceIdChange(event.target.value)}
+          />
+        </div>
+        <div>
+          <label htmlFor="developer-channel-id">Webhook channel ID</label>
+          <input
+            id="developer-channel-id"
+            placeholder={selectedChannel.id}
+            value={developerChannelId}
+            onChange={(event) => onDeveloperChannelIdChange(event.target.value)}
           />
         </div>
       </div>
@@ -1457,6 +1656,65 @@ function DeveloperSettingsPanel({
               </article>
             )
           })
+        )}
+      </section>
+
+      <form className="developer-form" onSubmit={onCreateWebhook}>
+        <div>
+          <label htmlFor="incoming-webhook-name">Webhook name</label>
+          <input
+            id="incoming-webhook-name"
+            value={newWebhookName}
+            onChange={(event) => onNewWebhookNameChange(event.target.value)}
+          />
+        </div>
+        <button type="submit" disabled={!newWebhookName.trim()}>
+          Create incoming webhook
+        </button>
+      </form>
+
+      <section className="developer-bot-list developer-webhook-list" aria-label="Incoming webhooks">
+        {webhooks.length === 0 ? (
+          <div className="empty-state">No incoming webhooks yet.</div>
+        ) : (
+          webhooks.map((webhook) => (
+            <article key={webhook.id} className="developer-bot-card developer-webhook-card">
+              <header>
+                <div>
+                  <h3>{webhook.name}</h3>
+                  <p>Channel {webhook.channelId}</p>
+                </div>
+                <span>{webhook.serverManaged ? 'Server webhook' : 'Local webhook'}</span>
+              </header>
+
+              <div className="developer-token-row">
+                <strong>Shown-once token</strong>
+                <code aria-label="Shown-once webhook token">{webhook.token}</code>
+              </div>
+
+              <div className="developer-token-row">
+                <strong>Execute URL</strong>
+                <code aria-label="Incoming webhook execute URL">{webhook.executeUrl}</code>
+              </div>
+
+              <div className="developer-bot-actions">
+                <button
+                  type="button"
+                  aria-label={`Rotate webhook token for ${webhook.name}`}
+                  onClick={() => onRotateWebhookToken(webhook.id)}
+                >
+                  Rotate token
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete webhook ${webhook.name}`}
+                  onClick={() => onDeleteWebhook(webhook.id)}
+                >
+                  Delete webhook
+                </button>
+              </div>
+            </article>
+          ))
         )}
       </section>
     </section>
@@ -2147,6 +2405,62 @@ function createLocalBotToken() {
 
 function hiddenBotTokenLabel(lastFour: string | null) {
   return lastFour ? `Hidden after creation - last 4 ${lastFour}` : 'Hidden after creation'
+}
+
+let localWebhookTokenCounter = 0
+
+function createLocalWebhookId(name: string) {
+  return `local-webhook-${Date.now()}-${slugForMeetingTitle(name)}`
+}
+
+function createLocalWebhookToken() {
+  localWebhookTokenCounter += 1
+  const bytes = new Uint8Array(18)
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi?.getRandomValues) {
+    cryptoApi.getRandomValues(bytes)
+  } else {
+    const fallback = `${Date.now()}-${Math.random()}-${localWebhookTokenCounter}`
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = fallback.charCodeAt(index % fallback.length) % 256
+    }
+  }
+
+  const randomHex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const counterSuffix = localWebhookTokenCounter.toString(36).padStart(4, '0')
+  return `ocw_${randomHex}${counterSuffix}`
+}
+
+function hiddenWebhookTokenLabel(lastFour: string | null) {
+  return lastFour ? `Hidden after creation - last 4 ${lastFour}` : 'Hidden after creation'
+}
+
+function webhookExecuteURL(serverURL: string, webhookId: string, token: string) {
+  return `${serverURL.replace(/\/+$/g, '')}/api/webhooks/${webhookId}/${token}`
+}
+
+function developerWebhookFromDetail(webhook: IncomingWebhook): DeveloperWebhook {
+  return {
+    id: webhook.id,
+    channelId: webhook.channelId,
+    name: webhook.name,
+    token: hiddenWebhookTokenLabel(webhook.tokenLastFour),
+    tokenLastFour: webhook.tokenLastFour,
+    executeUrl: 'Rotate token to reveal execute URL',
+    serverManaged: true,
+  }
+}
+
+function developerWebhookFromShownToken(webhook: IncomingWebhookWithToken): DeveloperWebhook {
+  return {
+    id: webhook.id,
+    channelId: webhook.channelId,
+    name: webhook.name,
+    token: webhook.token,
+    tokenLastFour: webhook.tokenLastFour,
+    executeUrl: webhook.executeUrl,
+    serverManaged: true,
+  }
 }
 
 function displayChannelName(name: string) {
