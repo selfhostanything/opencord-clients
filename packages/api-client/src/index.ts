@@ -54,6 +54,127 @@ export type AuthResult = {
   session: AuthSession
 }
 
+export type RegisterRequest = {
+  email: string
+  displayName: string
+  password: string
+}
+
+export type LoginRequest = {
+  email: string
+  password: string
+}
+
+export type CreateOrganizationRequest = {
+  name: string
+}
+
+export type Organization = {
+  id: string
+  name: string
+  slug: string
+  plan: string
+  deploymentMode: string
+  primaryRegion: string
+  createdAt: string
+  role: string | null
+}
+
+export type OrganizationMembership = {
+  role: string
+  status: string
+}
+
+export type OrganizationCreated = {
+  organization: Organization
+  membership: OrganizationMembership
+}
+
+export type CreateSpaceRequest = {
+  name: string
+}
+
+export type Space = {
+  id: string
+  organizationId: string
+  name: string
+  slug: string
+  createdAt: string
+  role: string | null
+}
+
+export type SpaceCreated = {
+  space: Space
+  membership: OrganizationMembership
+}
+
+export type ChannelKind = 'text' | 'voice'
+
+export type CreateChannelRequest = {
+  name: string
+  topic?: string
+  kind?: ChannelKind
+  isPrivate?: boolean
+}
+
+export type Channel = {
+  id: string
+  organizationId: string
+  spaceId: string
+  kind: ChannelKind
+  name: string
+  slug: string
+  topic: string | null
+  position: number
+  isPrivate: boolean
+  archivedAt: string | null
+  createdAt: string
+}
+
+export type CreateMessageRequest = {
+  content: string
+  attachmentIds?: string[]
+}
+
+export type UpdateMessageRequest = {
+  content: string
+}
+
+export type Message = {
+  id: string
+  organizationId: string
+  channelId: string
+  authorUserId: string
+  content: string
+  contentFormat: string
+  attachmentIds: string[]
+  createdAt: string
+  editedAt: string | null
+  deletedAt: string | null
+}
+
+export type CreateMeetingRequest = {
+  spaceId?: string | null
+  channelId?: string | null
+  title: string
+  description?: string | null
+  startsAt: string
+  endsAt: string
+  timezone: string
+  attendees?: Array<{
+    userId?: string | null
+    email?: string | null
+    displayName?: string | null
+    role?: string
+  }>
+  reminders?: Array<{
+    recipientUserId?: string | null
+    recipientEmail?: string | null
+    channel: string
+    offsetMinutes: number
+  }>
+}
+
 export type CreateBotApplicationRequest = {
   name: string
   description?: string
@@ -299,6 +420,92 @@ type AuthSessionPayload = {
 type AuthResultPayload = {
   user?: unknown
   session?: unknown
+}
+
+type OrganizationPayload = {
+  id?: unknown
+  name?: unknown
+  slug?: unknown
+  plan?: unknown
+  deployment_mode?: unknown
+  primary_region?: unknown
+  created_at?: unknown
+  role?: unknown
+}
+
+type OrganizationMembershipPayload = {
+  role?: unknown
+  status?: unknown
+}
+
+type OrganizationCreatedPayload = {
+  organization?: unknown
+  membership?: unknown
+}
+
+type OrganizationListPayload = {
+  organizations?: unknown
+}
+
+type SpacePayload = {
+  id?: unknown
+  organization_id?: unknown
+  name?: unknown
+  slug?: unknown
+  created_at?: unknown
+  role?: unknown
+}
+
+type SpaceCreatedPayload = {
+  space?: unknown
+  membership?: unknown
+}
+
+type SpaceListPayload = {
+  spaces?: unknown
+}
+
+type ChannelPayload = {
+  id?: unknown
+  organization_id?: unknown
+  space_id?: unknown
+  kind?: unknown
+  name?: unknown
+  slug?: unknown
+  topic?: unknown
+  position?: unknown
+  is_private?: unknown
+  archived_at?: unknown
+  created_at?: unknown
+}
+
+type ChannelResourcePayload = {
+  channel?: unknown
+}
+
+type ChannelListPayload = {
+  channels?: unknown
+}
+
+type MessagePayload = {
+  id?: unknown
+  organization_id?: unknown
+  channel_id?: unknown
+  author_user_id?: unknown
+  content?: unknown
+  content_format?: unknown
+  attachment_ids?: unknown
+  created_at?: unknown
+  edited_at?: unknown
+  deleted_at?: unknown
+}
+
+type MessageResourcePayload = {
+  message?: unknown
+}
+
+type MessageListPayload = {
+  messages?: unknown
 }
 
 type BotApplicationPayload = {
@@ -606,6 +813,185 @@ export class OpenCordApiClient {
     return authResultFromPayload(payload)
   }
 
+  async register(request: RegisterRequest): Promise<AuthResult> {
+    const payload = await this.requestJson<AuthResultPayload>('/auth/register', {
+      body: JSON.stringify({
+        email: request.email,
+        display_name: request.displayName,
+        password: request.password,
+      }),
+      method: 'POST',
+    })
+
+    return authResultFromPayload(payload)
+  }
+
+  async login(request: LoginRequest): Promise<AuthResult> {
+    const payload = await this.requestJson<AuthResultPayload>('/auth/login', {
+      body: JSON.stringify({
+        email: request.email,
+        password: request.password,
+      }),
+      method: 'POST',
+    })
+
+    return authResultFromPayload(payload)
+  }
+
+  async me(): Promise<AuthUser> {
+    const payload = await this.requestJson<{ user?: unknown }>('/me')
+    return authUserFromPayload(payload.user)
+  }
+
+  async createOrganization(request: CreateOrganizationRequest): Promise<OrganizationCreated> {
+    const payload = await this.requestJson<OrganizationCreatedPayload>('/organizations', {
+      body: JSON.stringify({
+        name: request.name,
+      }),
+      method: 'POST',
+    })
+
+    return organizationCreatedFromPayload(payload)
+  }
+
+  async listOrganizations(): Promise<Organization[]> {
+    const payload = await this.requestJson<OrganizationListPayload>('/organizations')
+    return arrayValue(payload.organizations).map(organizationFromPayload)
+  }
+
+  async createSpace(organizationId: string, request: CreateSpaceRequest): Promise<SpaceCreated> {
+    const payload = await this.requestJson<SpaceCreatedPayload>(
+      `/organizations/${encodeURIComponent(organizationId)}/spaces`,
+      {
+        body: JSON.stringify({
+          name: request.name,
+        }),
+        method: 'POST',
+      },
+    )
+
+    return spaceCreatedFromPayload(payload)
+  }
+
+  async listSpaces(organizationId: string): Promise<Space[]> {
+    const payload = await this.requestJson<SpaceListPayload>(
+      `/organizations/${encodeURIComponent(organizationId)}/spaces`,
+    )
+
+    return arrayValue(payload.spaces).map(spaceFromPayload)
+  }
+
+  async createChannel(spaceId: string, request: CreateChannelRequest): Promise<Channel> {
+    const payload = await this.requestJson<ChannelResourcePayload>(
+      `/spaces/${encodeURIComponent(spaceId)}/channels`,
+      {
+        body: JSON.stringify({
+          name: request.name,
+          topic: request.topic,
+          kind: request.kind,
+          is_private: request.isPrivate,
+        }),
+        method: 'POST',
+      },
+    )
+
+    return channelFromPayload(payload.channel)
+  }
+
+  async listChannels(spaceId: string): Promise<Channel[]> {
+    const payload = await this.requestJson<ChannelListPayload>(
+      `/spaces/${encodeURIComponent(spaceId)}/channels`,
+    )
+
+    return arrayValue(payload.channels).map(channelFromPayload)
+  }
+
+  async createMessage(channelId: string, request: CreateMessageRequest): Promise<Message> {
+    const payload = await this.requestJson<MessageResourcePayload>(
+      `/channels/${encodeURIComponent(channelId)}/messages`,
+      {
+        body: JSON.stringify({
+          content: request.content,
+          attachment_ids: request.attachmentIds ?? [],
+        }),
+        method: 'POST',
+      },
+    )
+
+    return messageFromPayload(payload.message)
+  }
+
+  async listMessages(channelId: string): Promise<Message[]> {
+    const payload = await this.requestJson<MessageListPayload>(
+      `/channels/${encodeURIComponent(channelId)}/messages`,
+    )
+
+    return arrayValue(payload.messages).map(messageFromPayload)
+  }
+
+  async updateMessage(messageId: string, request: UpdateMessageRequest): Promise<Message> {
+    const payload = await this.requestJson<MessageResourcePayload>(
+      `/messages/${encodeURIComponent(messageId)}`,
+      {
+        body: JSON.stringify({
+          content: request.content,
+        }),
+        method: 'PATCH',
+      },
+    )
+
+    return messageFromPayload(payload.message)
+  }
+
+  async deleteMessage(messageId: string): Promise<void> {
+    await this.requestJson<void>(`/messages/${encodeURIComponent(messageId)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async createMeeting(
+    organizationId: string,
+    request: CreateMeetingRequest,
+  ): Promise<Meeting> {
+    const payload = await this.requestJson<MeetingResourcePayload>(
+      `/organizations/${encodeURIComponent(organizationId)}/meetings`,
+      {
+        body: JSON.stringify({
+          space_id: request.spaceId,
+          channel_id: request.channelId,
+          title: request.title,
+          description: request.description,
+          starts_at: request.startsAt,
+          ends_at: request.endsAt,
+          timezone: request.timezone,
+          attendees: request.attendees?.map((attendee) => ({
+            user_id: attendee.userId,
+            email: attendee.email,
+            display_name: attendee.displayName,
+            role: attendee.role ?? 'required',
+          })),
+          reminders: request.reminders?.map((reminder) => ({
+            recipient_user_id: reminder.recipientUserId,
+            recipient_email: reminder.recipientEmail,
+            channel: reminder.channel,
+            offset_minutes: reminder.offsetMinutes,
+          })),
+        }),
+        method: 'POST',
+      },
+    )
+
+    return meetingFromPayload(payload.meeting)
+  }
+
+  async listMeetings(organizationId: string): Promise<Meeting[]> {
+    const payload = await this.requestJson<{ meetings?: unknown }>(
+      `/organizations/${encodeURIComponent(organizationId)}/meetings`,
+    )
+
+    return arrayValue(payload.meetings).map(meetingFromPayload)
+  }
+
   async registerPushToken(request: RegisterPushTokenRequest): Promise<PushToken> {
     const payload = await this.requestJson<PushTokenResourcePayload>('/push-tokens', {
       body: JSON.stringify({
@@ -881,6 +1267,10 @@ function pushPlatformValue(value: unknown): PushPlatform {
   return 'web'
 }
 
+function channelKindValue(value: unknown): ChannelKind {
+  return value === 'voice' ? 'voice' : 'text'
+}
+
 function mediaTokenGrantsFromPayload(value: unknown): MediaTokenGrants {
   const payload = objectValue(value) as MediaTokenGrantsPayload
 
@@ -1077,6 +1467,94 @@ function meetingReminderFromPayload(value: unknown): MeetingReminder {
     offsetMinutes: numberValue(payload.offset_minutes, 0),
     scheduledFor: stringValue(payload.scheduled_for, ''),
     status: stringValue(payload.status, 'pending'),
+  }
+}
+
+function organizationCreatedFromPayload(value: OrganizationCreatedPayload): OrganizationCreated {
+  return {
+    organization: organizationFromPayload(value.organization),
+    membership: organizationMembershipFromPayload(value.membership),
+  }
+}
+
+function organizationFromPayload(value: unknown): Organization {
+  const payload = objectValue(value) as OrganizationPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    name: stringValue(payload.name, ''),
+    slug: stringValue(payload.slug, ''),
+    plan: stringValue(payload.plan, 'free'),
+    deploymentMode: stringValue(payload.deployment_mode, 'self_hosted'),
+    primaryRegion: stringValue(payload.primary_region, 'local'),
+    createdAt: stringValue(payload.created_at, ''),
+    role: nullableStringValue(payload.role),
+  }
+}
+
+function organizationMembershipFromPayload(value: unknown): OrganizationMembership {
+  const payload = objectValue(value) as OrganizationMembershipPayload
+
+  return {
+    role: stringValue(payload.role, 'member'),
+    status: stringValue(payload.status, 'active'),
+  }
+}
+
+function spaceCreatedFromPayload(value: SpaceCreatedPayload): SpaceCreated {
+  return {
+    space: spaceFromPayload(value.space),
+    membership: organizationMembershipFromPayload(value.membership),
+  }
+}
+
+function spaceFromPayload(value: unknown): Space {
+  const payload = objectValue(value) as SpacePayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    name: stringValue(payload.name, ''),
+    slug: stringValue(payload.slug, ''),
+    createdAt: stringValue(payload.created_at, ''),
+    role: nullableStringValue(payload.role),
+  }
+}
+
+function channelFromPayload(value: unknown): Channel {
+  const payload = objectValue(value) as ChannelPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    spaceId: stringValue(payload.space_id, ''),
+    kind: channelKindValue(payload.kind),
+    name: stringValue(payload.name, ''),
+    slug: stringValue(payload.slug, ''),
+    topic: nullableStringValue(payload.topic),
+    position: numberValue(payload.position, 0),
+    isPrivate: booleanValue(payload.is_private, false),
+    archivedAt: nullableStringValue(payload.archived_at),
+    createdAt: stringValue(payload.created_at, ''),
+  }
+}
+
+function messageFromPayload(value: unknown): Message {
+  const payload = objectValue(value) as MessagePayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    channelId: stringValue(payload.channel_id, ''),
+    authorUserId: stringValue(payload.author_user_id, ''),
+    content: stringValue(payload.content, ''),
+    contentFormat: stringValue(payload.content_format, 'plain'),
+    attachmentIds: arrayValue(payload.attachment_ids).filter(
+      (attachmentId): attachmentId is string => typeof attachmentId === 'string',
+    ),
+    createdAt: stringValue(payload.created_at, ''),
+    editedAt: nullableStringValue(payload.edited_at),
+    deletedAt: nullableStringValue(payload.deleted_at),
   }
 }
 

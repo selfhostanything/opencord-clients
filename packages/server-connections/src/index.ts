@@ -16,6 +16,14 @@ export type ServerConnectionState = {
   connections: ServerConnection[]
 }
 
+export type DefaultServerConnectionOptions = {
+  baseUrl?: string
+  displayName?: string
+  serverVersion?: string
+  capabilities?: string[]
+  now?: string
+}
+
 export type UpsertServerConnectionInput = {
   baseUrl: string
   displayName?: string
@@ -49,13 +57,16 @@ type PersistedServerConnectionState = {
 const DEFAULT_CONNECTION_TIME = '1970-01-01T00:00:00.000Z'
 const DEFAULT_SERVER_BASE_URL = 'http://localhost:8080'
 
-export function createDefaultServerConnectionState(now = DEFAULT_CONNECTION_TIME) {
+export function createDefaultServerConnectionState(
+  input: string | DefaultServerConnectionOptions = DEFAULT_CONNECTION_TIME,
+) {
+  const options = typeof input === 'string' ? { now: input } : input
   const connection = serverConnectionFromInput({
-    baseUrl: DEFAULT_SERVER_BASE_URL,
-    displayName: 'Local OpenCord',
-    serverVersion: 'unknown',
-    capabilities: [],
-    now,
+    baseUrl: options.baseUrl ?? DEFAULT_SERVER_BASE_URL,
+    displayName: options.displayName ?? 'Local OpenCord',
+    serverVersion: options.serverVersion ?? 'unknown',
+    capabilities: options.capabilities ?? [],
+    now: options.now ?? DEFAULT_CONNECTION_TIME,
   })
 
   return {
@@ -278,7 +289,7 @@ function normalizeCapabilities(value: unknown) {
 
   return Array.from(
     new Set(value.filter((capability): capability is string => typeof capability === 'string')),
-  ).toSorted()
+  ).sort()
 }
 
 function serverConnectionId(baseUrl: string) {

@@ -5,6 +5,13 @@ coverage/
 .DS_Store
 *.local
 *.tsbuildinfo
+output/
 
 apps/*/node_modules/
 apps/*/dist/
+apps/*/test-results/
+apps/mobile/android/.gradle/
+apps/mobile/android/app/.cxx/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/local.properties

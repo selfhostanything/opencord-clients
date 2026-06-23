@@ -30,6 +30,22 @@ describe('server connection manager', () => {
     expect(active?.cacheNamespace).toBe(`server:${active?.id}`)
   })
 
+  it('supports platform-specific local default server connections', () => {
+    const state = createDefaultServerConnectionState({
+      baseUrl: 'http://10.0.2.2:8080',
+      displayName: 'Local OpenCord',
+      now: '2026-06-23T02:00:00.000Z',
+    })
+    const active = activeServerConnection(state)
+
+    expect(state.connections).toHaveLength(1)
+    expect(active).toMatchObject({
+      displayName: 'Local OpenCord',
+      baseUrl: 'http://10.0.2.2:8080',
+      lastConnectedAt: '2026-06-23T02:00:00.000Z',
+    })
+  })
+
   it('adds two independent servers, switches active server, and keeps separate cache namespaces', () => {
     const initial = createDefaultServerConnectionState('2026-06-23T02:00:00.000Z')
     const withCompany = upsertServerConnection(initial, {

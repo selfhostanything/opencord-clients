@@ -49,6 +49,68 @@ The web app defaults to `http://localhost:8080` for a local OpenCord server.
 Users can add, switch, remove, and persist multiple compatible OpenCord server
 connections.
 
+## Local Alpha Web
+
+Run the server stack first from the sibling `opencord-server` checkout:
+
+```bash
+make dev-deps
+make migrate
+make dev-api
+make dev-realtime
+make dev-worker
+```
+
+Then start or test the web client:
+
+```bash
+pnpm --filter web dev
+pnpm --filter web test
+pnpm --filter web lint
+pnpm --filter web build
+pnpm --filter web test:e2e
+```
+
+The Playwright e2e test uses the real local API at `http://localhost:8080`.
+It creates a unique local-alpha user/workspace per run and sends a
+server-backed message through the web UI. Keep `tests/e2e` under Playwright;
+Vitest excludes that folder so unit and browser suites do not mix.
+
+## Mobile And Android
+
+The mobile app is plain React Native CLI, not Expo. Metro uses port `8088` so
+it can run beside the OpenCord realtime service on `8081`.
+
+```bash
+pnpm --filter mobile test
+pnpm --filter mobile lint
+pnpm --filter mobile build
+pnpm --filter mobile android:build
+pnpm --filter mobile exec react-native bundle \
+  --platform android \
+  --entry-file index.js \
+  --dev false \
+  --bundle-output /tmp/opencord-mobile.android.bundle \
+  --assets-dest /tmp/opencord-mobile-assets \
+  --reset-cache
+```
+
+For Android emulator smoke on this machine:
+
+```bash
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+emulator -list-avds
+emulator -avd <your-avd-name> -no-snapshot-save -no-audio -no-boot-anim
+adb wait-for-device
+adb shell getprop ro.build.version.release
+pnpm --filter mobile start
+pnpm --filter mobile android
+```
+
+The Android emulator reaches the host OpenCord API through
+`http://10.0.2.2:8080`; do not use `localhost` inside the emulator.
+
 Verified customer custom domains work as normal server URLs. For example, once
 `customer.example.com` resolves through the OpenCord ingress and the server
 custom-domain mapping is active, the official web, desktop, and mobile clients

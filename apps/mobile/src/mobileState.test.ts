@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   activeMobileServerConnection,
   createInitialMobileState,
+  DEFAULT_MOBILE_OPENCORD_SERVER_URL,
   mobileCanListenToVoice,
   mobileCanSpeakInVoice,
   mobileReducer,
@@ -24,7 +25,8 @@ describe('mobile app state', () => {
     const state = createInitialMobileState()
 
     expect(state.screen).toBe('login')
-    expect(state.serverUrl).toBe('http://localhost:8080')
+    expect(state.serverUrl).toBe(DEFAULT_MOBILE_OPENCORD_SERVER_URL)
+    expect(activeMobileServerConnection(state)?.baseUrl).toBe(DEFAULT_MOBILE_OPENCORD_SERVER_URL)
     expect(state.channels.map((channel) => channel.name)).toContain('general')
   })
 
@@ -292,7 +294,22 @@ describe('mobile app state', () => {
       'Community',
     ])
     expect(activeMobileServerConnection(removed)?.displayName).toBe('Local OpenCord')
-    expect(removed.serverUrl).toBe('http://localhost:8080')
+    expect(removed.serverUrl).toBe(DEFAULT_MOBILE_OPENCORD_SERVER_URL)
+  })
+
+  it('restores the Android emulator local server when the last server is removed', () => {
+    const initial = createInitialMobileState()
+    const activeConnection = activeMobileServerConnection(initial)
+
+    expect(activeConnection).toBeDefined()
+
+    const state = mobileReducer(initial, {
+      type: 'server.remove',
+      connectionId: activeConnection!.id,
+    })
+
+    expect(activeMobileServerConnection(state)?.baseUrl).toBe(DEFAULT_MOBILE_OPENCORD_SERVER_URL)
+    expect(state.serverUrl).toBe(DEFAULT_MOBILE_OPENCORD_SERVER_URL)
   })
 
   it('joins a mobile voice channel and tracks local listen/speak capability', () => {

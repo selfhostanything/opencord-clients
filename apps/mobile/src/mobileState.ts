@@ -1,5 +1,4 @@
 import {
-  DEFAULT_OPENCORD_SERVER_URL,
   normalizeOpenCordBaseUrl,
   type PushPlatform,
   type PushToken,
@@ -20,6 +19,8 @@ import {
 } from '@opencord/server-connections'
 
 export type MobileScreen = 'login' | 'channels' | 'chat'
+
+export const DEFAULT_MOBILE_OPENCORD_SERVER_URL = 'http://10.0.2.2:8080'
 
 export type MobileAccount = {
   email: string
@@ -213,12 +214,12 @@ const initialVoiceState: MobileVoiceState = {
 }
 
 export function createInitialMobileState(): MobileAppState {
-  const serverConnections = createDefaultServerConnectionState()
+  const serverConnections = createDefaultMobileServerConnectionState()
   const activeConnection = activeServerConnection(serverConnections)
 
   return {
     screen: 'login',
-    serverUrl: activeConnection?.baseUrl ?? DEFAULT_OPENCORD_SERVER_URL,
+    serverUrl: activeConnection?.baseUrl ?? DEFAULT_MOBILE_OPENCORD_SERVER_URL,
     serverConnections,
     account: null,
     channels: initialChannels,
@@ -436,15 +437,17 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
       }
     }
     case 'server.remove': {
-      const serverConnections = removeServerConnection(
-        state.serverConnections,
-        action.connectionId,
-      )
+      const removesOnlyConnection =
+        state.serverConnections.connections.length === 1 &&
+        state.serverConnections.connections[0]?.id === action.connectionId
+      const serverConnections = removesOnlyConnection
+        ? createDefaultMobileServerConnectionState()
+        : removeServerConnection(state.serverConnections, action.connectionId)
       const activeConnection = activeServerConnection(serverConnections)
 
       return {
         ...state,
-        serverUrl: activeConnection?.baseUrl ?? DEFAULT_OPENCORD_SERVER_URL,
+        serverUrl: activeConnection?.baseUrl ?? DEFAULT_MOBILE_OPENCORD_SERVER_URL,
         serverConnections,
       }
     }
@@ -500,6 +503,13 @@ export function selectedChannel(state: MobileAppState) {
 
 export function activeMobileServerConnection(state: MobileAppState) {
   return activeServerConnection(state.serverConnections)
+}
+
+function createDefaultMobileServerConnectionState() {
+  return createDefaultServerConnectionState({
+    baseUrl: DEFAULT_MOBILE_OPENCORD_SERVER_URL,
+    displayName: 'Local OpenCord',
+  })
 }
 
 function displayNameForEmail(email: string) {

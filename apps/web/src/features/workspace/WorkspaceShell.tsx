@@ -2,9 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   createOpenCordApiClient,
+  OpenCordApiError,
+  type AuthUser,
+  type Channel as ApiChannel,
   type IncomingWebhook,
   type IncomingWebhookWithToken,
+  type Meeting as ApiMeeting,
+  type Message as ApiMessage,
+  type Organization,
   type ServerHealth,
+  type Space as ApiSpace,
 } from '@opencord/api-client'
 import {
   INITIAL_REALTIME_STATUS,
@@ -390,6 +397,10 @@ const defaultDeveloperPermissionIds: DeveloperPermissionId[] = [
 
 function meetingRoomStateFor(meetingId: string | undefined): MeetingRoomState {
   const meeting = initialMeetings.find((candidate) => candidate.id === meetingId) ?? initialMeetings[0]
+  return meetingRoomStateForMeeting(meeting)
+}
+
+function meetingRoomStateForMeeting(meeting: CalendarMeeting): MeetingRoomState {
   const participants: MeetingRoomParticipant[] = [
     { id: 'self', name: 'You', role: 'You', self: true },
   ]
@@ -428,7 +439,7 @@ export function WorkspaceShell({
   const [serverDisplayName, setServerDisplayName] = useState('')
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
   const [realtimeStatus] = useState<RealtimeConnectionStatus>(INITIAL_REALTIME_STATUS)
-  const [spaces] = useState(initialSpaces)
+  const [spaces, setSpaces] = useState(initialSpaces)
   const [channels, setChannels] = useState(initialChannels)
   const [messages, setMessages] = useState(initialMessages)
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaces[0].id)
@@ -447,6 +458,16 @@ export function WorkspaceShell({
   const [newMeetingTitle, setNewMeetingTitle] = useState('')
   const [newMeetingStartsAt, setNewMeetingStartsAt] = useState('2026-06-25T10:00')
   const [newMeetingEndsAt, setNewMeetingEndsAt] = useState('2026-06-25T10:30')
+  const [localAlphaEmail, setLocalAlphaEmail] = useState('alpha@example.com')
+  const [localAlphaDisplayName, setLocalAlphaDisplayName] = useState('Alpha User')
+  const [localAlphaPassword, setLocalAlphaPassword] = useState('')
+  const [localAlphaUser, setLocalAlphaUser] = useState<AuthUser | null>(null)
+  const [localAlphaSessionToken, setLocalAlphaSessionToken] = useState('')
+  const [localAlphaOrganization, setLocalAlphaOrganization] = useState<Organization | null>(null)
+  const [localAlphaStatus, setLocalAlphaStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    'idle',
+  )
+  const [localAlphaError, setLocalAlphaError] = useState<string | null>(null)
   const [meetingRoom, setMeetingRoom] = useState<MeetingRoomState | null>(() =>
     initialPanel === 'meeting' ? meetingRoomStateFor(initialMeetingId) : null,
   )
@@ -490,6 +511,99 @@ export function WorkspaceShell({
       setHealth(result)
       return result
     }
+  }
+
+  async function startLocalAlpha(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const email = localAlphaEmail.trim()
+    const displayName = localAlphaDisplayName.trim()
+    const password = localAlphaPassword
+    if (!email || !displayName || !password) {
+      setLocalAlphaStatus('error')
+      setLocalAlphaError('Email, display name, and password are required')
+      return
+    }
+
+    setLocalAlphaStatus('loading')
+    setLocalAlphaError(null)
+    try {
+      const anonymousClient = createOpenCordApiClient({ baseUrl: activeConnection.baseUrl })
+      const authResult = await registerOrLoginLocalAlpha(
+        anonymousClient,
+        email,
+        displayName,
+        password,
+      )
+      const client = createOpenCordApiClient({
+        baseUrl: activeConnection.baseUrl,
+        sessionToken: authResult.session.token,
+      })
+      const workspace = await ensureLocalAlphaWorkspace(client, authResult.user)
+      const loadedMessages = await client.listMessages(workspace.channel.id)
+
+      setLocalAlphaUser(authResult.user)
+      setLocalAlphaSessionToken(authResult.session.token)
+      setLocalAlphaOrganization(workspace.organization)
+      setSpaces([spaceFromApi(workspace.space)])
+      setChannels([channelFromApi(workspace.channel)])
+      setMessages(loadedMessages.map((message) => chatMessageFromApi(message, authResult.user)))
+      setSelectedSpaceId(workspace.space.id)
+      setSelectedChannelId(workspace.channel.id)
+      setDeveloperSessionToken(authResult.session.token)
+      setDeveloperOrganizationId(workspace.organization.id)
+      setDeveloperSpaceId(workspace.space.id)
+      setDeveloperChannelId(workspace.channel.id)
+      setPendingAttachments([])
+      setMeetingRoom(null)
+      setActivePanel('chat')
+      setLocalAlphaStatus('ready')
+    } catch (error) {
+      setLocalAlphaStatus('error')
+      setLocalAlphaError(error instanceof Error ? error.message : 'Unable to start local alpha')
+    }
+  }
+
+  async function registerOrLoginLocalAlpha(
+    client: ReturnType<typeof createOpenCordApiClient>,
+    email: string,
+    displayName: string,
+    password: string,
+  ) {
+    try {
+      return await client.register({ email, displayName, password })
+    } catch (error) {
+      if (error instanceof OpenCordApiError && error.status === 409) {
+        return client.login({ email, password })
+      }
+      throw error
+    }
+  }
+
+  async function ensureLocalAlphaWorkspace(
+    client: ReturnType<typeof createOpenCordApiClient>,
+    user: AuthUser,
+  ) {
+    const workspaceName = localAlphaWorkspaceName(user.email)
+    const organizations = await client.listOrganizations()
+    const organization =
+      organizations[0] ??
+      (await client.createOrganization({ name: `${workspaceName} Org` })).organization
+
+    const existingSpaces = await client.listSpaces(organization.id)
+    const space =
+      existingSpaces[0] ??
+      (await client.createSpace(organization.id, { name: `${workspaceName} Space` })).space
+
+    const existingChannels = await client.listChannels(space.id)
+    const channel =
+      existingChannels.find((candidate) => candidate.kind === 'text') ??
+      existingChannels[0] ??
+      (await client.createChannel(space.id, {
+        name: 'general',
+        topic: 'Local alpha chat',
+      }))
+
+    return { organization, space, channel }
   }
 
   useEffect(() => {
@@ -974,11 +1088,35 @@ export function WorkspaceShell({
     }
   }
 
-  function addChannel(event: FormEvent<HTMLFormElement>) {
+  async function addChannel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const name = normalizeChannelName(newChannelName)
     if (!name) {
       return
+    }
+
+    if (localAlphaSessionToken) {
+      try {
+        const client = createOpenCordApiClient({
+          baseUrl: activeConnection.baseUrl,
+          sessionToken: localAlphaSessionToken,
+        })
+        const created = await client.createChannel(selectedSpace.id, {
+          name,
+          topic: 'Local alpha channel',
+        })
+        const channel = channelFromApi(created)
+        setChannels((current) => [...current, channel])
+        setSelectedChannelId(channel.id)
+        setNewChannelName('')
+        setShowChannelForm(false)
+        setPendingAttachments([])
+        return
+      } catch (error) {
+        setLocalAlphaError(error instanceof Error ? error.message : 'Unable to create channel')
+        setLocalAlphaStatus('error')
+        return
+      }
     }
 
     const id = `${name}-${Date.now()}`
@@ -999,7 +1137,7 @@ export function WorkspaceShell({
     setShowChannelForm(false)
   }
 
-  function createMeeting(event: FormEvent<HTMLFormElement>) {
+  async function createMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const title = newMeetingTitle.trim()
     if (
@@ -1009,6 +1147,44 @@ export function WorkspaceShell({
       newMeetingEndsAt <= newMeetingStartsAt
     ) {
       return
+    }
+
+    if (localAlphaSessionToken && localAlphaOrganization) {
+      try {
+        const client = createOpenCordApiClient({
+          baseUrl: activeConnection.baseUrl,
+          sessionToken: localAlphaSessionToken,
+        })
+        const created = await client.createMeeting(localAlphaOrganization.id, {
+          spaceId: selectedSpace.id,
+          channelId: selectedChannel.id,
+          title,
+          startsAt: localDateTimeToIso(newMeetingStartsAt),
+          endsAt: localDateTimeToIso(newMeetingEndsAt),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          reminders: [
+            {
+              recipientUserId: localAlphaUser?.id ?? null,
+              channel: 'in_app',
+              offsetMinutes: 10,
+            },
+          ],
+        })
+        setMeetings((current) =>
+          [...current, calendarMeetingFromApi(created)].sort((left, right) =>
+            left.startsAt.localeCompare(right.startsAt),
+          ),
+        )
+        setNewMeetingTitle('')
+        setNewMeetingStartsAt('2026-06-25T10:00')
+        setNewMeetingEndsAt('2026-06-25T10:30')
+        setShowMeetingForm(false)
+        return
+      } catch (error) {
+        setLocalAlphaError(error instanceof Error ? error.message : 'Unable to create meeting')
+        setLocalAlphaStatus('error')
+        return
+      }
     }
 
     const joinSlug = `local-${slugForMeetingTitle(title)}`
@@ -1040,7 +1216,7 @@ export function WorkspaceShell({
   }
 
   function joinMeetingRoom(meeting: CalendarMeeting) {
-    setMeetingRoom(meetingRoomStateFor(meeting.id))
+    setMeetingRoom(meetingRoomStateForMeeting(meeting))
     setActivePanel('meeting')
   }
 
@@ -1068,11 +1244,35 @@ export function WorkspaceShell({
     )
   }
 
-  function sendMessage(event: FormEvent<HTMLFormElement>) {
+  async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const body = composerText.trim()
     if ((!body && pendingAttachments.length === 0) || !selectedChannel.canSend) {
       return
+    }
+
+    if (localAlphaSessionToken) {
+      try {
+        const client = createOpenCordApiClient({
+          baseUrl: activeConnection.baseUrl,
+          sessionToken: localAlphaSessionToken,
+        })
+        const created = await client.createMessage(selectedChannel.id, {
+          content: body,
+          attachmentIds: [],
+        })
+        setMessages((current) => [
+          ...current.filter((message) => message.id !== created.id),
+          chatMessageFromApi(created, localAlphaUser),
+        ])
+        setComposerText('')
+        setPendingAttachments([])
+        return
+      } catch (error) {
+        setLocalAlphaError(error instanceof Error ? error.message : 'Unable to send message')
+        setLocalAlphaStatus('error')
+        return
+      }
     }
 
     setMessages((current) => [
@@ -1114,7 +1314,7 @@ export function WorkspaceShell({
     )
   }
 
-  function saveEdit(event: FormEvent<HTMLFormElement>) {
+  async function saveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!editingMessage) {
       return
@@ -1125,6 +1325,27 @@ export function WorkspaceShell({
       return
     }
 
+    if (localAlphaSessionToken && isServerBackedId(editingMessage.id)) {
+      try {
+        const client = createOpenCordApiClient({
+          baseUrl: activeConnection.baseUrl,
+          sessionToken: localAlphaSessionToken,
+        })
+        const updated = await client.updateMessage(editingMessage.id, { content: body })
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === editingMessage.id ? chatMessageFromApi(updated, localAlphaUser) : message,
+          ),
+        )
+        setEditingMessage(null)
+        return
+      } catch (error) {
+        setLocalAlphaError(error instanceof Error ? error.message : 'Unable to edit message')
+        setLocalAlphaStatus('error')
+        return
+      }
+    }
+
     setMessages((current) =>
       current.map((message) =>
         message.id === editingMessage.id ? { ...message, body, edited: true } : message,
@@ -1133,7 +1354,21 @@ export function WorkspaceShell({
     setEditingMessage(null)
   }
 
-  function deleteMessage(messageId: string) {
+  async function deleteMessage(messageId: string) {
+    if (localAlphaSessionToken && isServerBackedId(messageId)) {
+      try {
+        const client = createOpenCordApiClient({
+          baseUrl: activeConnection.baseUrl,
+          sessionToken: localAlphaSessionToken,
+        })
+        await client.deleteMessage(messageId)
+      } catch (error) {
+        setLocalAlphaError(error instanceof Error ? error.message : 'Unable to delete message')
+        setLocalAlphaStatus('error')
+        return
+      }
+    }
+
     setMessages((current) => current.filter((message) => message.id !== messageId))
   }
 
@@ -1330,6 +1565,43 @@ export function WorkspaceShell({
               Add
             </button>
           </div>
+        </form>
+
+        <form className="local-alpha-form" onSubmit={startLocalAlpha}>
+          <label htmlFor="local-alpha-email">Local alpha email</label>
+          <input
+            id="local-alpha-email"
+            type="email"
+            value={localAlphaEmail}
+            onChange={(event) => setLocalAlphaEmail(event.target.value)}
+          />
+          <label htmlFor="local-alpha-display-name">Local alpha display name</label>
+          <input
+            id="local-alpha-display-name"
+            value={localAlphaDisplayName}
+            onChange={(event) => setLocalAlphaDisplayName(event.target.value)}
+          />
+          <label htmlFor="local-alpha-password">Local alpha password</label>
+          <input
+            id="local-alpha-password"
+            type="password"
+            value={localAlphaPassword}
+            onChange={(event) => setLocalAlphaPassword(event.target.value)}
+          />
+          <button type="submit" disabled={localAlphaStatus === 'loading'}>
+            {localAlphaStatus === 'loading' ? 'Starting' : 'Start local alpha'}
+          </button>
+          {localAlphaStatus === 'ready' && localAlphaUser ? (
+            <div className="local-alpha-status">
+              <strong>{localAlphaUser.displayName}</strong>
+              <span>{localAlphaOrganization?.name ?? 'Local alpha ready'}</span>
+            </div>
+          ) : null}
+          {localAlphaError ? (
+            <div className="local-alpha-status is-error" role="alert">
+              {localAlphaError}
+            </div>
+          ) : null}
         </form>
 
         <section className="server-connections" aria-label="Server connections">
@@ -2553,6 +2825,88 @@ function AttachmentSummary({ attachment }: { attachment: MessageAttachment }) {
       </span>
     </div>
   )
+}
+
+function spaceFromApi(space: ApiSpace): Space {
+  const name = space.name || 'Local Alpha'
+
+  return {
+    id: space.id,
+    name,
+    initials: initialsFor(name),
+    unread: false,
+    mentions: 0,
+  }
+}
+
+function channelFromApi(channel: ApiChannel): Channel {
+  return {
+    id: channel.id,
+    spaceId: channel.spaceId,
+    kind: channel.kind,
+    name: channel.slug || normalizeChannelName(channel.name) || channel.name,
+    topic: channel.topic || 'Local alpha channel',
+    category: channel.kind === 'voice' ? 'Voice channels' : 'Text channels',
+    canSend: channel.kind === 'text',
+    unread: false,
+    private: channel.isPrivate,
+  }
+}
+
+function chatMessageFromApi(message: ApiMessage, user: AuthUser | null): ChatMessage {
+  const own = Boolean(user?.id && user.id === message.authorUserId)
+  const timestamp = message.createdAt ? new Date(message.createdAt) : null
+
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    author: own ? 'You' : shortId(message.authorUserId),
+    role: 'Member',
+    time:
+      timestamp && !Number.isNaN(timestamp.getTime())
+        ? timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : 'now',
+    body: message.content,
+    own,
+    embeds: [],
+    attachments: [],
+    edited: Boolean(message.editedAt),
+  }
+}
+
+function calendarMeetingFromApi(meeting: ApiMeeting): CalendarMeeting {
+  return {
+    id: meeting.id,
+    title: meeting.title,
+    startsAt: meeting.startsAt,
+    endsAt: meeting.endsAt,
+    channelId: meeting.channelId ?? '',
+    organizer: 'You',
+    joinUrl: meeting.joinUrl,
+    status: meeting.status === 'cancelled' ? 'cancelled' : 'scheduled',
+  }
+}
+
+function localDateTimeToIso(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toISOString()
+}
+
+function isServerBackedId(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+}
+
+function localAlphaWorkspaceName(email: string) {
+  const localPart = email
+    .split('@')[0]
+    ?.replace(/[^a-zA-Z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+  return `Alpha ${localPart || 'User'}`
+}
+
+function shortId(value: string) {
+  return value ? value.slice(0, 8) : 'OpenCord'
 }
 
 function groupChannels(channels: Channel[]) {

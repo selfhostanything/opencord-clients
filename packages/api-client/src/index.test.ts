@@ -135,6 +135,188 @@ describe('OpenCord API client', () => {
     expect(error).toHaveProperty('message', 'missing')
   })
 
+  it('drives the local alpha auth organization space channel and message API path', async () => {
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            user: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+              email: 'alpha@example.com',
+              display_name: 'Alpha User',
+            },
+            session: { token: 'session-token' },
+          },
+          { status: 201 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          organization: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+            name: 'Alpha Org',
+            slug: 'alpha-org',
+            plan: 'free',
+            deployment_mode: 'self_hosted',
+            primary_region: 'local',
+            created_at: '2026-06-24T00:00:00Z',
+            role: 'owner',
+          },
+          membership: { role: 'owner', status: 'active' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          spaces: [
+            {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              name: 'Alpha Space',
+              slug: 'alpha-space',
+              created_at: '2026-06-24T00:01:00Z',
+              role: 'owner',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          space: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+            organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+            name: 'Alpha Space',
+            slug: 'alpha-space',
+            created_at: '2026-06-24T00:01:00Z',
+          },
+          membership: { role: 'owner', status: 'active' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          channel: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+            organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+            space_id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+            kind: 'text',
+            name: 'general',
+            slug: 'general',
+            topic: 'Local alpha chat',
+            position: 0,
+            is_private: false,
+            archived_at: null,
+            created_at: '2026-06-24T00:02:00Z',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          messages: [
+            {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc94',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+              author_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+              content: 'hello from local alpha',
+              content_format: 'plain',
+              created_at: '2026-06-24T00:03:00Z',
+              edited_at: null,
+              deleted_at: null,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          message: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+            organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+            channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+            author_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+            content: 'sent from the real API path',
+            content_format: 'plain',
+            created_at: '2026-06-24T00:04:00Z',
+            edited_at: null,
+            deleted_at: null,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const anonymousClient = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+    })
+
+    const registered = await anonymousClient.register({
+      email: 'alpha@example.com',
+      displayName: 'Alpha User',
+      password: 'correct horse battery staple',
+    })
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: registered.session.token,
+    })
+
+    await expect(client.createOrganization({ name: 'Alpha Org' })).resolves.toMatchObject({
+      organization: { id: '01973f83-f22a-73ba-ae76-5a045c52fc91', name: 'Alpha Org' },
+      membership: { role: 'owner' },
+    })
+    await expect(client.listSpaces('01973f83-f22a-73ba-ae76-5a045c52fc91')).resolves.toEqual([
+      expect.objectContaining({ id: '01973f83-f22a-73ba-ae76-5a045c52fc92' }),
+    ])
+    await expect(
+      client.createSpace('01973f83-f22a-73ba-ae76-5a045c52fc91', { name: 'Alpha Space' }),
+    ).resolves.toMatchObject({
+      space: { id: '01973f83-f22a-73ba-ae76-5a045c52fc92', name: 'Alpha Space' },
+      membership: { role: 'owner' },
+    })
+    await expect(
+      client.createChannel('01973f83-f22a-73ba-ae76-5a045c52fc92', {
+        name: 'general',
+        topic: 'Local alpha chat',
+      }),
+    ).resolves.toMatchObject({ id: '01973f83-f22a-73ba-ae76-5a045c52fc93', kind: 'text' })
+    await expect(client.listMessages('01973f83-f22a-73ba-ae76-5a045c52fc93')).resolves.toEqual([
+      expect.objectContaining({ content: 'hello from local alpha' }),
+    ])
+    await expect(
+      client.createMessage('01973f83-f22a-73ba-ae76-5a045c52fc93', {
+        content: 'sent from the real API path',
+      }),
+    ).resolves.toMatchObject({
+      id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+      content: 'sent from the real API path',
+    })
+    await expect(client.deleteMessage('01973f83-f22a-73ba-ae76-5a045c52fc95')).resolves.toBeUndefined()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://chat.example.com/auth/register', {
+      body: JSON.stringify({
+        email: 'alpha@example.com',
+        display_name: 'Alpha User',
+        password: 'correct horse battery staple',
+      }),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://chat.example.com/organizations',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer session-token' }),
+        method: 'POST',
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      'https://chat.example.com/messages/01973f83-f22a-73ba-ae76-5a045c52fc95',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
   it('discovers OIDC providers and completes signed OIDC login', async () => {
     const fetchMock = vi
       .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()

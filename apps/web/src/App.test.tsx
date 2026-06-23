@@ -44,6 +44,138 @@ describe('OpenCord web chat UI', () => {
     })
   })
 
+  it('bootstraps a local alpha workspace and sends messages through real API calls', async () => {
+    const channelId = '01973f83-f22a-73ba-ae76-5a045c52fc93'
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString()
+      if (url.endsWith('/healthz')) {
+        return new Response(JSON.stringify({ status: 'ok', version: 'test-version' }))
+      }
+      if (url.endsWith('/auth/register')) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+              email: 'alpha@example.com',
+              display_name: 'Alpha User',
+            },
+            session: { token: 'session-token' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/organizations')) {
+        return new Response(
+          JSON.stringify({
+            organization: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              name: 'Alpha Org',
+              slug: 'alpha-org',
+            },
+            membership: { role: 'owner', status: 'active' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/organizations/01973f83-f22a-73ba-ae76-5a045c52fc91/spaces')) {
+        return new Response(
+          JSON.stringify({
+            space: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              name: 'Alpha Space',
+              slug: 'alpha-space',
+            },
+            membership: { role: 'owner', status: 'active' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/spaces/01973f83-f22a-73ba-ae76-5a045c52fc92/channels')) {
+        return new Response(
+          JSON.stringify({
+            channel: {
+              id: channelId,
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              space_id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+              kind: 'text',
+              name: 'general',
+              slug: 'general',
+              topic: 'Local alpha chat',
+              position: 0,
+              is_private: false,
+              archived_at: null,
+            },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith(`/channels/${channelId}/messages`) && init?.method === undefined) {
+        return new Response(JSON.stringify({ messages: [] }))
+      }
+      if (url.endsWith(`/channels/${channelId}/messages`) && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            message: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc94',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              channel_id: channelId,
+              author_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+              content: 'Phase 9 real API message',
+              content_format: 'plain',
+              attachment_ids: [],
+              created_at: '2026-06-24T00:00:00Z',
+              edited_at: null,
+              deleted_at: null,
+            },
+          }),
+          { status: 201 },
+        )
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+
+    await userEvent.clear(screen.getByLabelText('Local alpha email'))
+    await userEvent.type(screen.getByLabelText('Local alpha email'), 'alpha@example.com')
+    await userEvent.type(screen.getByLabelText('Local alpha display name'), 'Alpha User')
+    await userEvent.type(screen.getByLabelText('Local alpha password'), 'correct horse battery staple')
+    await userEvent.click(screen.getByRole('button', { name: 'Start local alpha' }))
+
+    expect(await screen.findByRole('heading', { name: '# general' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Message timeline')).toHaveTextContent(
+      'No messages yet. Start the channel.',
+    )
+
+    await userEvent.type(screen.getByLabelText('Message composer'), 'Phase 9 real API message')
+    await userEvent.click(screen.getByRole('button', { name: 'Send message' }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message timeline')).toHaveTextContent(
+        'Phase 9 real API message',
+      )
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:8080/channels/${channelId}/messages`,
+      expect.objectContaining({
+        body: JSON.stringify({
+          content: 'Phase 9 real API message',
+          attachment_ids: [],
+        }),
+        method: 'POST',
+      }),
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8080/organizations',
+      expect.objectContaining({
+        body: JSON.stringify({ name: 'Alpha alpha Org' }),
+        method: 'POST',
+      }),
+    )
+  })
+
   it('renders typed workspace routes for channel, calendar, developer, and meeting surfaces', async () => {
     const router = createAppRouter({
       history: createMemoryHistory({
