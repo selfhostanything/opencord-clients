@@ -5,6 +5,10 @@ Rules for agents working in `opencord-clients`.
 - Use Node.js 26 through `fnm` before running package commands.
 - Use `pnpm` for installs, dependency updates, tests, and builds.
 - Prefer package-manager and generator commands over direct manifest edits.
+- Use readable version-number pins for package dependencies, runtimes, CI
+  actions, and container images. Do not pin them by commit SHA, image digest, or
+  other hash-style references unless a human explicitly approves a narrow
+  exception.
 - Use TDD for behavior changes.
 - Keep the official clients Apache-2.0 licensed.
 - The official web client must be able to connect to any compatible OpenCord server URL.
