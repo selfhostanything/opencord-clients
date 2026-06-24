@@ -6,6 +6,7 @@ export const DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL =
   'opencord:desktop-capture:picker-request'
 export const DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL =
   'opencord:desktop-capture:picker-response'
+export const DESKTOP_LIFECYCLE_STATE_CHANNEL = 'opencord:desktop:lifecycle-state'
 
 export type DesktopSettingsPanel =
   | 'account'
@@ -79,6 +80,12 @@ export type DesktopCapturePickerRequest = {
 export type DesktopCapturePickerResponse = {
   requestId: string
   sourceId: string | null
+}
+
+export type DesktopLifecycleState = {
+  backgroundRealtime: boolean
+  focused: boolean
+  visibility: 'visible' | 'hidden' | 'minimized'
 }
 
 type NativeMenuOptions = {
@@ -243,6 +250,31 @@ export function parseDesktopCapturePickerResponse(
 
   const sourceId = nonEmptyString(payload.sourceId)
   return sourceId ? { requestId, sourceId } : null
+}
+
+export function parseDesktopLifecycleState(value: unknown): DesktopLifecycleState | null {
+  const payload = objectValue(value)
+  if (!payload) {
+    return null
+  }
+
+  if (
+    payload.visibility !== 'visible' &&
+    payload.visibility !== 'hidden' &&
+    payload.visibility !== 'minimized'
+  ) {
+    return null
+  }
+
+  if (typeof payload.focused !== 'boolean' || typeof payload.backgroundRealtime !== 'boolean') {
+    return null
+  }
+
+  return {
+    backgroundRealtime: payload.backgroundRealtime,
+    focused: payload.focused,
+    visibility: payload.visibility,
+  }
 }
 
 export function buildDesktopTrayMenuTemplate(

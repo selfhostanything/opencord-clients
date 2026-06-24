@@ -1,4 +1,5 @@
 import {
+  createHashHistory,
   createRootRoute,
   createRoute,
   createRouter,
@@ -99,7 +100,7 @@ const routeTree = rootRoute.addChildren([
 export function createAppRouter(options: { history?: RouterHistory } = {}) {
   return createRouter({
     routeTree,
-    history: options.history,
+    history: options.history ?? defaultRouterHistory(),
     defaultPreload: 'intent',
   })
 }
@@ -110,6 +111,14 @@ export type AppRouter = typeof router
 
 export function workspaceRoutePathForTarget(target: OpenCordRouteTarget) {
   return buildOpenCordRoutePath(target)
+}
+
+function defaultRouterHistory() {
+  if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+    return createHashHistory()
+  }
+
+  return undefined
 }
 
 declare module '@tanstack/react-router' {

@@ -6,6 +6,7 @@ import {
   DESKTOP_CLIENT_STATE_CHANNEL,
   DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL,
   DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL,
+  DESKTOP_LIFECYCLE_STATE_CHANNEL,
   buildDesktopApplicationMenuTemplate,
   buildDesktopTrayMenuTemplate,
   createEmptyDesktopClientState,
@@ -15,6 +16,7 @@ import {
   parseDesktopCapturePickerResponse,
   parseDesktopClientCommand,
   parseDesktopClientState,
+  parseDesktopLifecycleState,
   type DesktopClientCommand,
 } from './desktopNative'
 
@@ -28,6 +30,7 @@ describe('desktop native shell bridge', () => {
     expect(DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL).toBe(
       'opencord:desktop-capture:picker-response',
     )
+    expect(DESKTOP_LIFECYCLE_STATE_CHANNEL).toBe('opencord:desktop:lifecycle-state')
   })
 
   it('validates and normalizes non-secret renderer desktop state', () => {
@@ -110,6 +113,45 @@ describe('desktop native shell bridge', () => {
       .toEqual({ requestId: 'capture-1', sourceId: null })
     expect(parseDesktopCapturePickerResponse({ requestId: '', sourceId: 'screen:0:0' }))
       .toBeNull()
+  })
+
+  it('validates desktop lifecycle state before it crosses the preload bridge', () => {
+    expect(
+      parseDesktopLifecycleState({
+        backgroundRealtime: true,
+        focused: false,
+        visibility: 'hidden',
+      }),
+    ).toEqual({
+      backgroundRealtime: true,
+      focused: false,
+      visibility: 'hidden',
+    })
+    expect(
+      parseDesktopLifecycleState({
+        backgroundRealtime: true,
+        focused: false,
+        visibility: 'minimized',
+      }),
+    ).toEqual({
+      backgroundRealtime: true,
+      focused: false,
+      visibility: 'minimized',
+    })
+    expect(
+      parseDesktopLifecycleState({
+        backgroundRealtime: true,
+        focused: false,
+        visibility: 'background',
+      }),
+    ).toBeNull()
+    expect(
+      parseDesktopLifecycleState({
+        backgroundRealtime: 'yes',
+        focused: false,
+        visibility: 'hidden',
+      }),
+    ).toBeNull()
   })
 
   it('builds a tray menu that mirrors server, channel, and voice state', () => {

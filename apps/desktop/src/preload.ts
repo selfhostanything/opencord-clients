@@ -12,13 +12,16 @@ import {
   DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL,
   DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL,
   isDesktopClientCommand,
+  DESKTOP_LIFECYCLE_STATE_CHANNEL,
   parseDesktopCapturePickerRequest,
   parseDesktopCapturePickerResponse,
   parseDesktopClientState,
+  parseDesktopLifecycleState,
   type DesktopClientCommand,
   type DesktopClientState,
   type DesktopCapturePickerRequest,
   type DesktopCapturePickerResponse,
+  type DesktopLifecycleState,
 } from './desktopNative'
 import {
   DEEP_LINK_ROUTE_CHANNEL,
@@ -105,6 +108,25 @@ contextBridge.exposeInMainWorld('openCordDesktop', {
       }
 
       return ipcRenderer.invoke(DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL, payload) as Promise<boolean>
+    },
+  },
+  lifecycle: {
+    onState(handler: (state: DesktopLifecycleState) => void) {
+      if (typeof handler !== 'function') {
+        return () => undefined
+      }
+
+      const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        const state = parseDesktopLifecycleState(payload)
+        if (state) {
+          handler(state)
+        }
+      }
+
+      ipcRenderer.on(DESKTOP_LIFECYCLE_STATE_CHANNEL, listener)
+      return () => {
+        ipcRenderer.removeListener(DESKTOP_LIFECYCLE_STATE_CHANNEL, listener)
+      }
     },
   },
   deviceSessions: {

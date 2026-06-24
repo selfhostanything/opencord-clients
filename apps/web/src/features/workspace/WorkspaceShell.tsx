@@ -250,6 +250,9 @@ type OpenCordDesktopRuntime = {
   deepLinks?: {
     onRoute(handler: (route: { routePath: string; target: { kind: string } }) => void): () => void
   }
+  lifecycle?: {
+    onState(handler: (state: OpenCordDesktopLifecycleState) => void): () => void
+  }
   notifications?: {
     showMessage(payload: {
       authorName: string
@@ -325,6 +328,12 @@ type OpenCordDesktopCapturePickerRequest = {
 type OpenCordDesktopCapturePickerResponse = {
   requestId: string
   sourceId: string | null
+}
+
+type OpenCordDesktopLifecycleState = {
+  backgroundRealtime: boolean
+  focused: boolean
+  visibility: 'visible' | 'hidden' | 'minimized'
 }
 
 declare global {
@@ -590,6 +599,12 @@ export function WorkspaceShell({
   const [desktopQuickSwitcherQuery, setDesktopQuickSwitcherQuery] = useState('')
   const [desktopCaptureRequest, setDesktopCaptureRequest] =
     useState<OpenCordDesktopCapturePickerRequest | null>(null)
+  const [desktopLifecycleState, setDesktopLifecycleState] =
+    useState<OpenCordDesktopLifecycleState>({
+      backgroundRealtime: false,
+      focused: true,
+      visibility: 'visible',
+    })
   const [activeUserSettingsPanel, setActiveUserSettingsPanel] =
     useState<OpenCordSettingsPanel>(initialSettingsPanel ?? 'voice-video')
   const [newChannelName, setNewChannelName] = useState('')
@@ -1116,6 +1131,16 @@ export function WorkspaceShell({
   useEffect(() => {
     const unsubscribe = desktopRuntime?.screenShare?.onPickerRequest((request) => {
       setDesktopCaptureRequest(request)
+    })
+
+    return () => {
+      unsubscribe?.()
+    }
+  }, [desktopRuntime])
+
+  useEffect(() => {
+    const unsubscribe = desktopRuntime?.lifecycle?.onState((state) => {
+      setDesktopLifecycleState(state)
     })
 
     return () => {
@@ -2606,6 +2631,7 @@ export function WorkspaceShell({
         {showUserSettings ? (
           <UserSettingsPanel
             activePanel={activeUserSettingsPanel}
+            desktopLifecycleState={desktopLifecycleState}
             desktopRuntime={desktopRuntime}
             onClose={() => setShowUserSettings(false)}
             onSelectPanel={setActiveUserSettingsPanel}
@@ -3049,11 +3075,13 @@ function DesktopQuickSwitcher({
 
 function UserSettingsPanel({
   activePanel,
+  desktopLifecycleState,
   desktopRuntime,
   onClose,
   onSelectPanel,
 }: {
   activePanel: OpenCordSettingsPanel
+  desktopLifecycleState: OpenCordDesktopLifecycleState
   desktopRuntime: OpenCordDesktopRuntime | null
   onClose: () => void
   onSelectPanel: (panel: OpenCordSettingsPanel) => void
@@ -3164,6 +3192,17 @@ function UserSettingsPanel({
             status="No publish access"
             detail="Used to play remote voice and meeting audio from other participants."
           />
+          {desktopRuntime ? (
+            <DevicePermissionRow
+              label="Desktop background connection"
+              status={
+                desktopLifecycleState.backgroundRealtime
+                  ? `Active while ${desktopLifecycleState.visibility}`
+                  : 'Browser controlled'
+              }
+              detail="OpenCord keeps realtime and voice control state alive while the Electron window is hidden or minimized."
+            />
+          ) : null}
         </div>
       )}
     </section>

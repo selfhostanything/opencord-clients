@@ -53,6 +53,7 @@ export function resolveRendererEntry({
 export function createSecureWebPreferences(preload: string): WebPreferences {
   return {
     preload,
+    backgroundThrottling: false,
     contextIsolation: true,
     nodeIntegration: false,
     sandbox: true,

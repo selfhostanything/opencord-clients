@@ -100,6 +100,45 @@ describe('OpenCord web chat UI', () => {
     expect(screen.queryByRole('region', { name: 'Voice & Video settings' })).not.toBeInTheDocument()
   })
 
+  it('shows Electron background lifecycle status inside Voice & Video settings', async () => {
+    type LifecycleHandler = (state: {
+      backgroundRealtime: boolean
+      focused: boolean
+      visibility: 'visible' | 'hidden' | 'minimized'
+    }) => void
+    let lifecycleHandler: LifecycleHandler | null = null
+
+    vi.stubGlobal('openCordDesktop', {
+      lifecycle: {
+        onState(handler: LifecycleHandler) {
+          lifecycleHandler = handler
+          return () => {
+            lifecycleHandler = null
+          }
+        },
+      },
+      platform: 'darwin',
+    })
+
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'User settings' }))
+    const voiceVideoSettings = screen.getByRole('region', { name: 'Voice & Video settings' })
+
+    expect(voiceVideoSettings).toHaveTextContent('Desktop background connection')
+    expect(voiceVideoSettings).toHaveTextContent('Browser controlled')
+
+    act(() => {
+      lifecycleHandler?.({
+        backgroundRealtime: true,
+        focused: false,
+        visibility: 'hidden',
+      })
+    })
+
+    expect(voiceVideoSettings).toHaveTextContent('Active while hidden')
+  })
+
   it('renders notification settings with browser permission state from the settings route', async () => {
     const requestPermission = vi.fn(async () => 'granted' as NotificationPermission)
     vi.stubGlobal('Notification', {

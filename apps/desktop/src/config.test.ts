@@ -32,6 +32,7 @@ describe('desktop shell config', () => {
   it('uses secure BrowserWindow defaults for renderer isolation', () => {
     expect(createSecureWebPreferences('/tmp/preload.js')).toMatchObject({
       preload: '/tmp/preload.js',
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -49,6 +50,7 @@ describe('desktop shell config', () => {
       show: false,
       webPreferences: {
         preload: '/tmp/preload.js',
+        backgroundThrottling: false,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

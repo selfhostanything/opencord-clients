@@ -25,6 +25,7 @@ import {
   DESKTOP_CLIENT_STATE_CHANNEL,
   DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL,
   DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL,
+  DESKTOP_LIFECYCLE_STATE_CHANNEL,
   buildDesktopApplicationMenuTemplate,
   buildDesktopTrayMenuTemplate,
   createEmptyDesktopClientState,
@@ -34,6 +35,7 @@ import {
   type DesktopClientState,
   type DesktopCapturePickerRequest,
   type DesktopCaptureSource,
+  type DesktopLifecycleState,
 } from './desktopNative'
 import {
   DEEP_LINK_ROUTE_CHANNEL,
@@ -60,6 +62,7 @@ const appRoot = path.resolve(__dirname, '..')
 const repoRoot = path.resolve(appRoot, '../..')
 const preloadPath = path.join(__dirname, 'preload.js')
 const smokeMode = process.argv.includes('--smoke')
+const backgroundSmokeMode = process.argv.includes('--background-smoke')
 const e2eUserDataPath = process.env.OPENCORD_DESKTOP_USER_DATA_PATH?.trim()
 if (e2eUserDataPath) {
   app.setPath('userData', e2eUserDataPath)
@@ -183,6 +186,11 @@ async function createWindow() {
   window.webContents.once('did-finish-load', () => {
     flushPendingDeepLinkRoute(window)
     refreshDesktopNativeShell()
+    sendDesktopLifecycleState(window)
+    if (backgroundSmokeMode) {
+      void runDesktopBackgroundSmoke(window)
+      return
+    }
     if (smokeMode) {
       console.log('opencord-desktop-ready')
       app.quit()
@@ -191,24 +199,39 @@ async function createWindow() {
   window.once('ready-to-show', () => {
     window.show()
     refreshDesktopNativeShell()
+    sendDesktopLifecycleState(window)
   })
   window.on('minimize', () => {
     refreshDesktopNativeShell()
+    sendDesktopLifecycleState(window)
+  })
+  window.on('restore', () => {
+    refreshDesktopNativeShell()
+    sendDesktopLifecycleState(window)
   })
   window.on('show', () => {
     refreshDesktopNativeShell()
+    sendDesktopLifecycleState(window)
   })
   window.on('hide', () => {
     refreshDesktopNativeShell()
+    sendDesktopLifecycleState(window)
+  })
+  window.on('focus', () => {
+    sendDesktopLifecycleState(window)
+  })
+  window.on('blur', () => {
+    sendDesktopLifecycleState(window)
   })
   window.on('close', (event) => {
-    if (isQuitting || smokeMode) {
+    if (isQuitting || smokeMode || backgroundSmokeMode) {
       return
     }
 
     event.preventDefault()
     window.hide()
     refreshDesktopNativeShell()
+    sendDesktopLifecycleState(window)
   })
   window.on('closed', () => {
     if (mainWindow === window) {
@@ -282,6 +305,49 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+
+async function runDesktopBackgroundSmoke(window: BrowserWindow) {
+  window.show()
+  sendDesktopLifecycleState(window)
+  await waitForDesktopSmoke()
+  window.hide()
+  sendDesktopLifecycleState(window)
+  const realtimeMarker = await waitForDesktopRealtimeMarker(window)
+
+  const visible = window.isVisible()
+  const rendererAlive = !window.webContents.isDestroyed()
+
+  console.log(
+    `opencord-desktop-background-smoke:${JSON.stringify({
+      realtimeMarker,
+      rendererAlive,
+      visible,
+    })}`,
+  )
+  isQuitting = true
+  app.quit()
+}
+
+function waitForDesktopSmoke() {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 200)
+  })
+}
+
+async function waitForDesktopRealtimeMarker(window: BrowserWindow) {
+  const startedAt = Date.now()
+  while (!window.webContents.isDestroyed() && Date.now() - startedAt < 5_000) {
+    const markerFound = await window.webContents.executeJavaScript(
+      "Boolean(document.querySelector('[data-realtime-url]'))",
+    )
+    if (markerFound) {
+      return true
+    }
+    await waitForDesktopSmoke()
+  }
+
+  return false
+}
 
 function applyDesktopMediaAutomationCommandLine(config: DesktopMediaAutomationConfig) {
   if (!config.enabled) {
@@ -481,6 +547,28 @@ function quitOpenCord() {
 function sendDesktopClientCommand(command: DesktopClientCommand) {
   showMainWindow()
   mainWindow?.webContents.send(DESKTOP_CLIENT_COMMAND_CHANNEL, command)
+}
+
+function sendDesktopLifecycleState(window: BrowserWindow) {
+  if (window.isDestroyed() || window.webContents.isDestroyed()) {
+    return
+  }
+
+  window.webContents.send(DESKTOP_LIFECYCLE_STATE_CHANNEL, desktopLifecycleStateForWindow(window))
+}
+
+function desktopLifecycleStateForWindow(window: BrowserWindow): DesktopLifecycleState {
+  const visibility = window.isMinimized()
+    ? 'minimized'
+    : window.isVisible()
+      ? 'visible'
+      : 'hidden'
+
+  return {
+    backgroundRealtime: !window.webContents.isDestroyed(),
+    focused: window.isFocused(),
+    visibility,
+  }
 }
 
 function captureDesktopDeepLink(value: string | null) {
