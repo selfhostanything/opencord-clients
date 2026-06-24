@@ -92,6 +92,35 @@ describe('mobile app state', () => {
     expect(state.selectedChannelId).toBe('019ef679-303f-72f2-83bd-4501222533f2')
   })
 
+  it('logs out without leaking session or jumping away from the active server', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.succeeded',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+      displayName: 'Ada',
+      sessionToken: 'session-token',
+      channels: [],
+    })
+    const permissionReady = mobileReducer(loggedIn, {
+      type: 'permission.updated',
+      kind: 'microphone',
+      status: 'granted',
+    })
+    const joined = mobileReducer(permissionReady, { type: 'voice.join', channelId: 'standup' })
+
+    const state = mobileReducer(joined, { type: 'logout' })
+
+    expect(state.screen).toBe('login')
+    expect(state.serverUrl).toBe('https://chat.example.com')
+    expect(activeMobileServerConnection(state)?.baseUrl).toBe('https://chat.example.com')
+    expect(state.account).toBeNull()
+    expect(state.sessionToken).toBeNull()
+    expect(state.voice.connectedChannelId).toBeNull()
+    expect(mobileVoiceParticipantsForChannel(state, 'standup').map((participant) => participant.name)).not.toContain(
+      'You',
+    )
+  })
+
   it('selects a channel and opens chat', () => {
     const loggedIn = mobileReducer(createInitialMobileState(), {
       type: 'login.submit',

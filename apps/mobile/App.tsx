@@ -44,6 +44,7 @@ import {
   persistDeviceSession,
   type ServerConnection,
 } from '@opencord/server-connections'
+import type { OpenCordSettingsPanel } from '@opencord/client-contracts'
 
 import {
   activeMobileServerConnection,
@@ -78,6 +79,7 @@ import {
   type MobileVoiceParticipant,
 } from './src/mobileState'
 import {
+  clearMobileRuntimeStores,
   useMobileChatStore,
   useMobileMeetingsStore,
   useMobileSessionStore,
@@ -185,6 +187,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     (store) => store.setLocalReminder,
   )
   const upsertMobileMeeting = useMobileMeetingsStore((store) => store.upsertMeeting)
+  const activeSettingsPanel = useMobileSettingsStore((store) => store.activePanel)
   const setMobileAccountMetadata = useMobileSessionStore((store) => store.setAccountMetadata)
   const setMobileRouteTarget = useMobileSessionStore((store) => store.setRouteTarget)
   const openMobileSettingsPanel = useMobileSettingsStore((store) => store.openPanel)
@@ -199,6 +202,9 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [meetingPanelOpen, setMeetingPanelOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [serverManagerOpen, setServerManagerOpen] = useState(false)
+  const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null)
+  const [logoutStatus, setLogoutStatus] = useState<'idle' | 'loading'>('idle')
+  const [activeDeviceSessionSaved, setActiveDeviceSessionSaved] = useState(false)
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
   const composerText = composerTextByChannelId[state.selectedChannelId] ?? ''
@@ -265,6 +271,25 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   useEffect(() => {
     stateRef.current = state
   }, [state])
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      return
+    }
+
+    let cancelled = false
+    void loadActiveDeviceSession(mobileDeviceSessionStoresRef.current, state.serverUrl).then(
+      (storedSession) => {
+        if (!cancelled) {
+          setActiveDeviceSessionSaved(Boolean(storedSession))
+        }
+      },
+    )
+
+    return () => {
+      cancelled = true
+    }
+  }, [settingsOpen, state.serverUrl])
 
   useEffect(() => {
     setMobileAccountMetadata(state.account)
@@ -655,9 +680,10 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         rememberDevice: loginRememberDevice,
       })
       if (loginRememberDevice) {
-        await persistMobileDeviceSession(loginServerUrl, authResult)
+        setActiveDeviceSessionSaved(await persistMobileDeviceSession(loginServerUrl, authResult))
       } else {
         await clearActiveDeviceSession(mobileDeviceSessionStoresRef.current, loginServerUrl)
+        setActiveDeviceSessionSaved(false)
       }
       const client = createOpenCordApiClient({
         baseUrl: loginServerUrl,
@@ -699,7 +725,9 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       const authResult = await authClient.refreshSession({
         refreshToken: storedSession.refreshToken,
       })
-      await persistMobileDeviceSession(storedSession.serverUrl, authResult)
+      setActiveDeviceSessionSaved(
+        await persistMobileDeviceSession(storedSession.serverUrl, authResult),
+      )
       const client = createOpenCordApiClient({
         baseUrl: storedSession.serverUrl,
         sessionToken: authResult.session.token,
@@ -716,6 +744,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       })
     } catch (error) {
       await clearActiveDeviceSession(mobileDeviceSessionStoresRef.current, storedSession.serverUrl)
+      setActiveDeviceSessionSaved(false)
       setLoginError(errorMessage(error, 'Saved login expired. Please log in again.'))
     } finally {
       setLoginStatus('idle')
@@ -725,9 +754,9 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   async function persistMobileDeviceSession(
     serverUrl: string,
     authResult: AuthResult,
-  ) {
+  ): Promise<boolean> {
     if (!authResult.session.refreshToken) {
-      return
+      return false
     }
 
     await persistDeviceSession(mobileDeviceSessionStoresRef.current, {
@@ -737,6 +766,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       serverUrl,
       userId: authResult.user.id,
     })
+    return true
   }
 
   function switchServer(connectionId: string) {
@@ -752,6 +782,51 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
 
     dispatch({ type: 'server.add', baseUrl })
     setServerManagerOpen(false)
+  }
+
+  async function clearSavedMobileLogin() {
+    await clearActiveDeviceSession(mobileDeviceSessionStoresRef.current, state.serverUrl)
+    setActiveDeviceSessionSaved(false)
+    setSettingsFeedback('Saved login cleared for this server.')
+  }
+
+  async function logoutMobileSession() {
+    if (logoutStatus === 'loading') {
+      return
+    }
+
+    setLogoutStatus('loading')
+    setSettingsFeedback(null)
+    let logoutError: string | null = null
+    const logoutServerUrl = state.serverUrl
+    const logoutToken = state.sessionToken
+
+    try {
+      await voiceSessionRef.current?.disconnect()
+      voiceSessionRef.current = null
+      if (logoutToken) {
+        await createOpenCordApiClient({
+          baseUrl: logoutServerUrl,
+          sessionToken: logoutToken,
+        }).logout()
+      }
+    } catch (error) {
+      logoutError = errorMessage(error, 'Server session revoke did not complete.')
+    } finally {
+      await clearActiveDeviceSession(mobileDeviceSessionStoresRef.current, logoutServerUrl)
+      setActiveDeviceSessionSaved(false)
+      clearMobileRuntimeStores()
+      dispatch({ type: 'logout' })
+      setMeetingFeedback(null)
+      setMeetingPanelOpen(false)
+      setSettingsOpen(false)
+      setServerManagerOpen(false)
+      setPassword('')
+      setLoginError(
+        logoutError ? `${logoutError} Local saved login was cleared.` : null,
+      )
+      setLogoutStatus('idle')
+    }
   }
 
   async function openMobileCalendarPanel() {
@@ -1597,11 +1672,26 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
               />
             ) : null}
             {settingsOpen ? (
-              <PermissionSettingsPanel
+              <MobileSettingsPanel
+                accountName={state.account?.displayName ?? 'OpenCord'}
+                activePanel={activeSettingsPanel}
+                email={state.account?.email ?? 'Not signed in'}
+                feedback={settingsFeedback}
+                hasSavedDeviceSession={activeDeviceSessionSaved}
+                logoutStatus={logoutStatus}
                 maxHeight={permissionPanelMaxHeight}
+                onClearSavedLogin={() => {
+                  void clearSavedMobileLogin()
+                }}
+                onClose={() => setSettingsOpen(false)}
+                onLogout={() => {
+                  void logoutMobileSession()
+                }}
                 onOpenSettings={openNativePermissionSettings}
                 onRequest={requestPermission}
+                onSelectPanel={openMobileSettingsPanel}
                 rows={permissionRows}
+                serverUrl={state.serverUrl}
               />
             ) : null}
             {state.voice.errorMessage ? (
@@ -1714,11 +1804,26 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         }}
       />
       {settingsOpen ? (
-        <PermissionSettingsPanel
+        <MobileSettingsPanel
+          accountName={state.account?.displayName ?? 'OpenCord'}
+          activePanel={activeSettingsPanel}
+          email={state.account?.email ?? 'Not signed in'}
+          feedback={settingsFeedback}
+          hasSavedDeviceSession={activeDeviceSessionSaved}
+          logoutStatus={logoutStatus}
           maxHeight={permissionPanelMaxHeight}
+          onClearSavedLogin={() => {
+            void clearSavedMobileLogin()
+          }}
+          onClose={() => setSettingsOpen(false)}
+          onLogout={() => {
+            void logoutMobileSession()
+          }}
           onOpenSettings={openNativePermissionSettings}
           onRequest={requestPermission}
+          onSelectPanel={openMobileSettingsPanel}
           rows={permissionRows}
+          serverUrl={state.serverUrl}
         />
       ) : null}
       <FlatList
@@ -2380,24 +2485,201 @@ function ChannelRow({
   )
 }
 
-function PermissionSettingsPanel({
+const mobileSettingsTabs: Array<{ panel: OpenCordSettingsPanel; label: string }> = [
+  { panel: 'account', label: 'Account' },
+  { panel: 'server-connections', label: 'Servers' },
+  { panel: 'voice-video', label: 'Voice' },
+  { panel: 'notifications', label: 'Notifications' },
+  { panel: 'appearance', label: 'Appearance' },
+]
+
+function MobileSettingsPanel({
+  accountName,
+  activePanel,
+  email,
+  feedback,
+  hasSavedDeviceSession,
+  logoutStatus,
   maxHeight,
+  onClearSavedLogin,
+  onClose,
+  onLogout,
+  onOpenSettings,
+  onRequest,
+  onSelectPanel,
+  rows,
+  serverUrl,
+}: {
+  accountName: string
+  activePanel: OpenCordSettingsPanel
+  email: string
+  feedback: string | null
+  hasSavedDeviceSession: boolean
+  logoutStatus: 'idle' | 'loading'
+  maxHeight: number
+  onClearSavedLogin: () => void
+  onClose: () => void
+  onLogout: () => void
+  onOpenSettings: () => void
+  onRequest: (kind: MobileMediaPermissionKind) => void
+  onSelectPanel: (panel: OpenCordSettingsPanel) => void
+  rows: MobileMediaPermissionRow[]
+  serverUrl: string
+}) {
+  const visiblePanel = activePanel === 'native-call-integration' ? 'voice-video' : activePanel
+  const permissionRows =
+    visiblePanel === 'notifications'
+      ? rows.filter((row) => row.kind === 'notifications')
+      : visiblePanel === 'privacy-permissions'
+        ? rows
+        : rows.filter((row) => row.kind !== 'notifications')
+
+  return (
+    <ScrollView
+      contentContainerStyle={styles.settingsPanelContent}
+      nestedScrollEnabled
+      style={[styles.settingsPanel, { maxHeight }]}
+    >
+      <View style={styles.settingsPanelHeader}>
+        <View style={styles.settingsPanelTitleBlock}>
+          <Text style={styles.permissionTitle}>Settings</Text>
+          <Text numberOfLines={1} style={styles.subtle}>
+            {serverUrl}
+          </Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeSheetButton}>
+          <Text style={styles.headerActionText}>Close</Text>
+        </Pressable>
+      </View>
+      <ScrollView
+        contentContainerStyle={styles.settingsTabs}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+      >
+        {mobileSettingsTabs.map((tab) => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: visiblePanel === tab.panel }}
+            key={tab.panel}
+            onPress={() => onSelectPanel(tab.panel)}
+            style={[
+              styles.settingsTab,
+              visiblePanel === tab.panel ? styles.activeSettingsTab : null,
+            ]}
+          >
+            <Text
+              style={[
+                styles.settingsTabText,
+                visiblePanel === tab.panel ? styles.activeSettingsTabText : null,
+              ]}
+            >
+              {tab.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+      {visiblePanel === 'account' ? (
+        <View style={styles.settingsSection}>
+          <SettingsInfoRow label="Account" value={accountName} detail={email} />
+          <SettingsInfoRow label="Current server" value={serverUrl} />
+          <SettingsInfoRow
+            label="Saved login"
+            value={hasSavedDeviceSession ? 'On this device' : 'Session only'}
+            detail={
+              hasSavedDeviceSession
+                ? 'OpenCord can restore this account after restart.'
+                : 'OpenCord will ask for login after restart.'
+            }
+          />
+          {feedback ? <Text style={styles.permissionStatus}>{feedback}</Text> : null}
+          <View style={styles.settingsActionRow}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={!hasSavedDeviceSession}
+              onPress={onClearSavedLogin}
+              style={[
+                styles.secondarySettingsButton,
+                !hasSavedDeviceSession ? styles.disabledSettingsButton : null,
+              ]}
+            >
+              <Text style={styles.primaryButtonText}>Clear saved login</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={logoutStatus === 'loading'}
+              onPress={onLogout}
+              style={[
+                styles.dangerSettingsButton,
+                logoutStatus === 'loading' ? styles.disabledSettingsButton : null,
+              ]}
+            >
+              <Text style={styles.primaryButtonText}>
+                {logoutStatus === 'loading' ? 'Logging out' : 'Log out'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {visiblePanel === 'server-connections' ? (
+        <View style={styles.settingsSection}>
+          <SettingsInfoRow label="Current server" value={serverUrl} />
+          <SettingsInfoRow
+            label="Identity"
+            value={email}
+            detail="Account and saved login stay separate per server."
+          />
+        </View>
+      ) : null}
+      {visiblePanel === 'voice-video' || visiblePanel === 'notifications' || visiblePanel === 'privacy-permissions' ? (
+        <PermissionSettingsRows
+          onOpenSettings={onOpenSettings}
+          onRequest={onRequest}
+          rows={permissionRows}
+        />
+      ) : null}
+      {visiblePanel === 'appearance' ? (
+        <View style={styles.settingsSection}>
+          <SettingsInfoRow label="Theme" value="Dark" />
+          <SettingsInfoRow label="Density" value="Compact mobile" />
+        </View>
+      ) : null}
+    </ScrollView>
+  )
+}
+
+function SettingsInfoRow({
+  detail,
+  label,
+  value,
+}: {
+  detail?: string
+  label: string
+  value: string
+}) {
+  return (
+    <View style={styles.settingsInfoRow}>
+      <View style={styles.permissionCopy}>
+        <Text style={styles.permissionLabel}>{label}</Text>
+        {detail ? <Text style={styles.subtle}>{detail}</Text> : null}
+      </View>
+      <Text numberOfLines={1} style={styles.settingsInfoValue}>
+        {value}
+      </Text>
+    </View>
+  )
+}
+
+function PermissionSettingsRows({
   onOpenSettings,
   onRequest,
   rows,
 }: {
-  maxHeight: number
   onOpenSettings: () => void
   onRequest: (kind: MobileMediaPermissionKind) => void
   rows: MobileMediaPermissionRow[]
 }) {
   return (
-    <ScrollView
-      contentContainerStyle={styles.permissionPanelContent}
-      nestedScrollEnabled
-      style={[styles.permissionPanel, { maxHeight }]}
-    >
-      <Text style={styles.permissionTitle}>Voice & Video</Text>
+    <>
       {rows.map((row) => (
         <View key={row.kind} style={styles.permissionRow}>
           <View style={styles.permissionCopy}>
@@ -2426,7 +2708,7 @@ function PermissionSettingsPanel({
           ) : null}
         </View>
       ))}
-    </ScrollView>
+    </>
   )
 }
 
@@ -3936,18 +4218,100 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
   },
-  permissionPanel: {
+  settingsPanel: {
     borderBottomColor: '#2b2f2d',
     borderBottomWidth: 1,
   },
-  permissionPanelContent: {
+  settingsPanelContent: {
+    gap: 10,
     padding: 12,
+  },
+  settingsPanelHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  settingsPanelTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  settingsTabs: {
+    gap: 8,
+    paddingBottom: 2,
+  },
+  settingsTab: {
+    alignItems: 'center',
+    backgroundColor: '#232428',
+    borderColor: '#232428',
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  activeSettingsTab: {
+    backgroundColor: '#1d2b28',
+    borderColor: '#28796d',
+  },
+  settingsTabText: {
+    color: '#d8ddd5',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  activeSettingsTabText: {
+    color: '#86e0bb',
+  },
+  settingsSection: {
+    gap: 8,
+  },
+  settingsInfoRow: {
+    alignItems: 'center',
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 62,
+    padding: 10,
+  },
+  settingsInfoValue: {
+    color: '#f5f6f3',
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '800',
+    maxWidth: '48%',
+  },
+  settingsActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  secondarySettingsButton: {
+    alignItems: 'center',
+    backgroundColor: '#353535',
+    borderRadius: 8,
+    flexGrow: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 12,
+  },
+  dangerSettingsButton: {
+    alignItems: 'center',
+    backgroundColor: '#623238',
+    borderRadius: 8,
+    flexGrow: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 12,
+  },
+  disabledSettingsButton: {
+    opacity: 0.5,
   },
   permissionTitle: {
     color: '#f5f6f3',
     fontSize: 16,
     fontWeight: '800',
-    marginBottom: 8,
   },
   permissionRow: {
     alignItems: 'center',

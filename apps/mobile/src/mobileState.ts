@@ -603,7 +603,7 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
       }
     }
     case 'logout':
-      return createInitialMobileState()
+      return createInitialMobileState({ defaultServerUrl: state.serverUrl })
     case 'channel.select': {
       if (!state.channels.some((channel) => channel.id === action.channelId)) {
         return state

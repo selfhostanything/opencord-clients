@@ -3,6 +3,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import type { OpenCordRouteTarget } from '@opencord/client-contracts'
 
 import {
+  clearMobileRuntimeStores,
   resetMobileStoresForTest,
   useMobileChatStore,
   useMobileMeetingsStore,
@@ -235,6 +236,45 @@ describe('mobile Zustand stores', () => {
         },
       ],
     })
+  })
+
+  it('clears mobile runtime stores after logout without retaining secrets', () => {
+    useMobileSessionStore.getState().setAccountMetadata({
+      displayName: 'Ada',
+      email: 'ada@example.com',
+    })
+    useMobileChatStore.getState().setComposerText('general', 'draft')
+    useMobileChatStore.getState().beginReply({ channelId: 'general', messageId: 'msg-1' })
+    useMobileMeetingsStore.getState().setMeetings([mobileMeetingFixture()])
+    useMobileVoiceStore.getState().joinRoute({
+      kind: 'channel',
+      serverId: 'local-opencord',
+      spaceId: 'space-1',
+      channelId: 'voice',
+    })
+    useMobileSettingsStore.getState().openPanel('developer')
+
+    clearMobileRuntimeStores()
+
+    expect(useMobileSessionStore.getState()).toMatchObject({
+      account: null,
+      routePath: '/',
+      routeTarget: null,
+    })
+    expect(useMobileChatStore.getState()).toMatchObject({
+      composerTextByChannelId: {},
+      replyTarget: null,
+    })
+    expect(useMobileMeetingsStore.getState()).toMatchObject({
+      meetings: [],
+      selectedMeetingId: null,
+    })
+    expect(useMobileVoiceStore.getState()).toMatchObject({
+      activeRoute: null,
+      connectionStatus: 'idle',
+    })
+    expect(useMobileSettingsStore.getState().activePanel).toBe('account')
+    expect(JSON.stringify(useMobileSessionStore.getState())).not.toContain('token')
   })
 })
 

@@ -358,12 +358,16 @@ export const useMobileSettingsStore = create<MobileSettingsStore>((set) => ({
   setPermissionRows: (permissionRows) => set({ permissionRows }),
 }))
 
-export function resetMobileStoresForTest() {
+export function clearMobileRuntimeStores() {
   useMobileSessionStore.setState(initialSessionData)
   useMobileChatStore.setState(initialChatData)
   useMobileMeetingsStore.setState(initialMeetingsData)
   useMobileVoiceStore.setState(initialVoiceData)
   useMobileSettingsStore.setState(initialSettingsData)
+}
+
+export function resetMobileStoresForTest() {
+  clearMobileRuntimeStores()
 }
 
 function sortMeetings(meetings: Meeting[]) {

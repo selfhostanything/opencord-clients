@@ -12,6 +12,7 @@ const requiredOpenApiPaths = [
   '/healthz',
   '/.well-known/opencord',
   '/auth/login',
+  '/auth/logout',
   '/auth/refresh',
   '/push-tokens',
   '/voice/channels/{channel_id}/join',
@@ -32,6 +33,10 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
     status: init?.status ?? 200,
     statusText: init?.statusText,
   })
+}
+
+function noContentResponse() {
+  return new Response(null, { status: 204 })
 }
 
 function meetingPayload(overrides: Record<string, unknown> = {}) {
@@ -60,6 +65,7 @@ describe('OpenCord API client', () => {
   it('keeps generated OpenAPI path types at the package boundary', () => {
     expect(requiredOpenApiPaths).toContain('/healthz')
     expect(requiredOpenApiPaths).toContain('/auth/login')
+    expect(requiredOpenApiPaths).toContain('/auth/logout')
     expect(requiredOpenApiPaths).toContain('/auth/refresh')
     expect(requiredOpenApiPaths).toContain('/meetings/{meeting_id}')
     expect(requiredOpenApiPaths).toContain('/channels/{channel_id}/webhooks')
@@ -590,6 +596,27 @@ describe('OpenCord API client', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+  })
+
+  it('revokes the current bearer session on logout', async () => {
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValue(noContentResponse())
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await client.logout()
+
+    expect(fetchMock).toHaveBeenCalledWith('https://chat.example.com/auth/logout', {
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer session-token',
       },
       method: 'POST',
     })

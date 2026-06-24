@@ -964,6 +964,12 @@ export class OpenCordApiClient {
     return authResultFromPayload(payload)
   }
 
+  async logout(): Promise<void> {
+    await this.requestJson<void>('/auth/logout', {
+      method: 'POST',
+    })
+  }
+
   async me(): Promise<AuthUser> {
     const payload = await this.requestJson<{ user?: unknown }>('/me')
     return authUserFromPayload(payload.user)
