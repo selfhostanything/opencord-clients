@@ -40,6 +40,7 @@ describe('mobile e2e launch config', () => {
       password: '',
       preferredVoiceChannelName: null,
       rememberDevice: true,
+      restoreOnly: false,
       runId: null,
       serverUrl: 'http://localhost:8080',
     })
@@ -58,6 +59,7 @@ describe('mobile e2e launch config', () => {
         meetingTitle: ' OpenCord Local Alpha Standup ',
         preferredVoiceChannelName: ' Voice Lounge ',
         rememberDevice: false,
+        restoreOnly: true,
         serverUrl: ' http://localhost:8080 ',
       }),
     ).toEqual({
@@ -71,6 +73,33 @@ describe('mobile e2e launch config', () => {
       password: 'correct horse battery staple',
       preferredVoiceChannelName: 'Voice Lounge',
       rememberDevice: false,
+      restoreOnly: true,
+      runId: null,
+      serverUrl: 'http://localhost:8080',
+    })
+  })
+
+  it('allows restore-only launch props without a password for restart checks', () => {
+    expect(
+      normalizeMobileE2ELaunchConfig({
+        commandUrl: ' http://127.0.0.1:19007/command ',
+        enabled: true,
+        email: ' owner@opencord.local ',
+        restoreOnly: true,
+        serverUrl: ' http://localhost:8080 ',
+      }),
+    ).toEqual({
+      autoJoinMeeting: false,
+      autoJoinVoice: false,
+      commandUrl: 'http://127.0.0.1:19007/command',
+      demoWorkspace: false,
+      email: 'owner@opencord.local',
+      meetingId: null,
+      meetingTitle: null,
+      password: '',
+      preferredVoiceChannelName: null,
+      rememberDevice: true,
+      restoreOnly: true,
       runId: null,
       serverUrl: 'http://localhost:8080',
     })
@@ -98,6 +127,7 @@ describe('mobile e2e launch config', () => {
           password: 'correct horse battery staple',
           preferredVoiceChannelName: 'Voice Lounge',
           rememberDevice: true,
+          restoreOnly: false,
           runId: 'oc-10-007',
           serverUrl: 'http://localhost:8080',
         },

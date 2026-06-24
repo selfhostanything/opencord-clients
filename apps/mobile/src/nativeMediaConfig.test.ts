@@ -55,6 +55,10 @@ describe('native mobile media configuration', () => {
     expect(mainApplication).toContain('AudioType.CommunicationAudioType')
     expect(mainApplication).toContain('OpenCordCallControlsPackage()')
     expect(mainActivity).toContain('enableMediaProjectionService = true')
+    expect(mainActivity).toContain('"rememberDevice"')
+    expect(mainActivity).toContain('"OPENCORD_E2E_REMEMBER_DEVICE"')
+    expect(mainActivity).toContain('"restoreOnly"')
+    expect(mainActivity).toContain('"OPENCORD_E2E_RESTORE_ONLY"')
   })
 
   it('registers LiveKit globals before the native app component mounts', () => {
@@ -84,6 +88,19 @@ describe('native mobile media configuration', () => {
     expect(infoPlist).toContain('<string>audio</string>')
     expect(infoPlist).toContain('<string>voip</string>')
     expect(appDelegate).toContain('LivekitReactNative.setup()')
+    expect(appDelegate).toContain('"rememberDevice"')
+    expect(appDelegate).toContain('OPENCORD_E2E_REMEMBER_DEVICE')
+    expect(appDelegate).toContain('"restoreOnly"')
+    expect(appDelegate).toContain('OPENCORD_E2E_RESTORE_ONLY')
+  })
+
+  it('links iOS native storage modules used for remembered device sessions', () => {
+    const podfileLock = readMobileFile('ios/Podfile.lock')
+
+    expect(podfileLock).toContain(
+      'AsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)',
+    )
+    expect(podfileLock).toContain('RNKeychain (from `../node_modules/react-native-keychain`)')
   })
 
   it('includes native iOS CallKit bridge sources', () => {

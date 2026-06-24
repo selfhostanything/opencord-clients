@@ -11,6 +11,7 @@ export type MobileE2ELaunchConfig = {
   password: string
   preferredVoiceChannelName: string | null
   rememberDevice: boolean
+  restoreOnly: boolean
   runId: string | null
   serverUrl: string
 }
@@ -31,7 +32,8 @@ export function normalizeMobileE2ELaunchConfig(value: unknown): MobileE2ELaunchC
   const email = trimmedString(candidate.email)
   const password = typeof candidate.password === 'string' ? candidate.password : ''
   const demoWorkspace = candidate.demoWorkspace === true
-  if (!serverUrl || !email || (!password && !demoWorkspace)) {
+  const restoreOnly = candidate.restoreOnly === true
+  if (!serverUrl || !email || (!password && !demoWorkspace && !restoreOnly)) {
     return null
   }
 
@@ -46,6 +48,7 @@ export function normalizeMobileE2ELaunchConfig(value: unknown): MobileE2ELaunchC
     password,
     preferredVoiceChannelName: trimmedString(candidate.preferredVoiceChannelName),
     rememberDevice: candidate.rememberDevice !== false,
+    restoreOnly,
     runId: trimmedString(candidate.runId),
     serverUrl,
   }

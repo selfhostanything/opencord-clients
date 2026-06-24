@@ -48,6 +48,14 @@ class MainActivity : ReactActivity() {
       "demoWorkspace",
       intent.getBooleanExtra("OPENCORD_E2E_DEMO_WORKSPACE", false),
     )
+    config.putBoolean(
+      "rememberDevice",
+      intent.getBooleanExtra("OPENCORD_E2E_REMEMBER_DEVICE", true),
+    )
+    config.putBoolean(
+      "restoreOnly",
+      intent.getBooleanExtra("OPENCORD_E2E_RESTORE_ONLY", false),
+    )
     putStringExtra(config, "serverUrl", "OPENCORD_E2E_SERVER_URL")
     putStringExtra(config, "email", "OPENCORD_E2E_EMAIL")
     putStringExtra(config, "password", "OPENCORD_E2E_PASSWORD")

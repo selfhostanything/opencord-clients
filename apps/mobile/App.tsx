@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   StatusBar,
+  Switch,
   Text,
   TextInput,
   useWindowDimensions,
@@ -96,6 +97,8 @@ type MobileLoginCredentials = {
   rememberDevice?: boolean
   serverUrl: string
 }
+
+const REMEMBER_DEVICE_SWITCH_TRACK_COLOR = { false: '#4a514c', true: '#28796d' }
 
 export default function App({ initialE2EConfig }: OpenCordMobileAppProps = {}) {
   return (
@@ -262,6 +265,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         email: e2eLaunchConfig.email,
         meetingId: e2eLaunchConfig.meetingId,
         runId: e2eLaunchConfig.runId,
+        restoreOnly: e2eLaunchConfig.restoreOnly,
         serverUrl: e2eLaunchConfig.serverUrl,
       }),
     )
@@ -269,6 +273,9 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     setEmail(e2eLaunchConfig.email)
     setPassword(e2eLaunchConfig.password)
     setRememberDevice(e2eLaunchConfig.rememberDevice)
+    if (e2eLaunchConfig.restoreOnly) {
+      return
+    }
     if (e2eLaunchConfig.demoWorkspace) {
       dispatch({
         type: 'login.submit',
@@ -462,7 +469,11 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   }, [])
 
   useEffect(() => {
-    if (e2eLaunchConfig || state.screen !== 'login' || loginStatus === 'loading') {
+    if (
+      (e2eLaunchConfig && !e2eLaunchConfig.restoreOnly) ||
+      state.screen !== 'login' ||
+      loginStatus === 'loading'
+    ) {
       return
     }
 
@@ -933,26 +944,21 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
             style={styles.input}
             value={password}
           />
-          <Pressable
-            accessibilityLabel="Remember this device"
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: rememberDevice }}
-            onPress={() => setRememberDevice((current) => !current)}
-            style={styles.rememberDeviceRow}
-          >
-            <View
-              style={[
-                styles.rememberDeviceBox,
-                rememberDevice ? styles.rememberDeviceBoxChecked : null,
-              ]}
-            >
-              {rememberDevice ? <Text style={styles.rememberDeviceCheck}>on</Text> : null}
-            </View>
+          <View style={styles.rememberDeviceRow}>
             <View style={styles.rememberDeviceCopy}>
               <Text style={styles.rememberDeviceLabel}>Remember this device</Text>
               <Text style={styles.subtle}>Reopen without logging in on this phone.</Text>
             </View>
-          </Pressable>
+            <Switch
+              accessibilityLabel="Remember this device"
+              accessibilityRole="switch"
+              ios_backgroundColor="#4a514c"
+              onValueChange={setRememberDevice}
+              thumbColor={rememberDevice ? '#e9fffa' : '#f5f6f3'}
+              trackColor={REMEMBER_DEVICE_SWITCH_TRACK_COLOR}
+              value={rememberDevice}
+            />
+          </View>
           {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
           <Pressable
             accessibilityRole="button"
@@ -2033,26 +2039,9 @@ const styles = StyleSheet.create({
   rememberDeviceRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
+    justifyContent: 'space-between',
     minHeight: 44,
-  },
-  rememberDeviceBox: {
-    alignItems: 'center',
-    borderColor: '#4a514c',
-    borderRadius: 6,
-    borderWidth: 1,
-    height: 28,
-    justifyContent: 'center',
-    width: 42,
-  },
-  rememberDeviceBoxChecked: {
-    backgroundColor: '#28796d',
-    borderColor: '#28796d',
-  },
-  rememberDeviceCheck: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '900',
   },
   rememberDeviceCopy: {
     flex: 1,

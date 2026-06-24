@@ -40,6 +40,10 @@ const appRoot = path.resolve(__dirname, '..')
 const repoRoot = path.resolve(appRoot, '../..')
 const preloadPath = path.join(__dirname, 'preload.js')
 const smokeMode = process.argv.includes('--smoke')
+const e2eUserDataPath = process.env.OPENCORD_DESKTOP_USER_DATA_PATH?.trim()
+if (e2eUserDataPath) {
+  app.setPath('userData', e2eUserDataPath)
+}
 const mediaAutomationConfig = desktopMediaAutomationConfig()
 const deviceSessionSecrets = createDesktopDeviceSessionSecretStore({
   safeStorage,

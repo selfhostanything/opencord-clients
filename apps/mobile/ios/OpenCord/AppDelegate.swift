@@ -70,6 +70,8 @@ private func openCordInitialProperties() -> [String: Any]? {
     "autoJoinMeeting": environment["OPENCORD_E2E_AUTO_JOIN_MEETING"] == "1",
     "autoJoinVoice": environment["OPENCORD_E2E_AUTO_JOIN_VOICE"] == "1",
     "demoWorkspace": environment["OPENCORD_E2E_DEMO_WORKSPACE"] == "1",
+    "rememberDevice": environment["OPENCORD_E2E_REMEMBER_DEVICE"] != "0",
+    "restoreOnly": environment["OPENCORD_E2E_RESTORE_ONLY"] == "1",
   ]
   if let serverUrl = environment["OPENCORD_E2E_SERVER_URL"] {
     config["serverUrl"] = serverUrl
