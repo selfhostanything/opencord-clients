@@ -83,6 +83,57 @@ export type MobileMessage = {
   embeds: MobileRichEmbed[]
   time: string
   own: boolean
+  deleted?: boolean
+  deliveryError?: string | null
+  deliveryStatus?: 'sending' | 'sent' | 'failed'
+  edited?: boolean
+  editedAt?: string
+  mentions?: MobileMentionToken[]
+  pinned?: boolean
+  reactions?: MobileMessageReaction[]
+  replyToMessageId?: string
+}
+
+export type MobileMessageReaction = {
+  emoji: string
+  count: number
+  selfReacted: boolean
+}
+
+export type MobileMentionToken = {
+  display: string
+  query: string
+  start: number
+  end: number
+}
+
+export type MobileMessageTimelineGroup = {
+  id: string
+  authorName: string
+  own: boolean
+  messages: MobileMessage[]
+}
+
+export type MobileMessageActionId =
+  | 'reply'
+  | 'edit'
+  | 'delete'
+  | 'copy'
+  | 'pin'
+  | 'react'
+  | 'report'
+
+export type MobileMessageActionOption = {
+  id: MobileMessageActionId
+  label: string
+  destructive?: boolean
+}
+
+export type MobileComposerUiState = {
+  canSend: boolean
+  disabledReason: string | null
+  mode: 'send' | 'reply' | 'edit'
+  placeholder: string
 }
 
 export type MobileRichEmbed = {
@@ -202,7 +253,20 @@ export type MobileAction =
   | { type: 'logout' }
   | { type: 'channel.select'; channelId: string }
   | { type: 'channel.back' }
-  | { type: 'message.send'; content: string }
+  | {
+      type: 'message.send'
+      content: string
+      clientId?: string
+      deliveryStatus?: MobileMessage['deliveryStatus']
+      errorMessage?: string
+      now?: string
+      replyToMessageId?: string
+    }
+  | { type: 'message.retry'; messageId: string; now?: string }
+  | { type: 'message.edit'; messageId: string; content: string; now?: string }
+  | { type: 'message.delete'; messageId: string }
+  | { type: 'message.pin'; messageId: string; pinned: boolean }
+  | { type: 'message.react'; messageId: string; emoji: string }
   | { type: 'realtime.status_changed'; status: RealtimeConnectionStatus }
   | { type: 'realtime.message_created'; envelope: RealtimeIncomingEnvelope }
   | { type: 'realtime.media_permission_revoked'; envelope: RealtimeIncomingEnvelope }
@@ -327,6 +391,8 @@ const initialMessages: MobileMessage[] = [
     ],
     time: '09:10',
     own: false,
+    deliveryStatus: 'sent',
+    mentions: [],
   },
   {
     id: 'seed-2',
@@ -336,6 +402,8 @@ const initialMessages: MobileMessage[] = [
     embeds: [],
     time: '09:16',
     own: false,
+    deliveryStatus: 'sent',
+    mentions: [],
   },
 ]
 
@@ -490,23 +558,111 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
       if (!content) {
         return state
       }
+      const channel = selectedChannel(state)
+      if (channel.kind !== 'text') {
+        return state
+      }
+      const deliveryStatus = action.deliveryStatus ?? 'sent'
 
       return {
         ...state,
         messages: [
           ...state.messages,
           {
-            id: `local-${Date.now()}`,
+            id: action.clientId ?? `local-${Date.now()}`,
             channelId: state.selectedChannelId,
             authorName: 'You',
             content,
+            deliveryError: deliveryStatus === 'failed' ? action.errorMessage ?? 'Unable to send.' : null,
+            deliveryStatus,
             embeds: [],
-            time: 'now',
+            mentions: mobileMentionTokens(content),
             own: true,
+            replyToMessageId: action.replyToMessageId,
+            time: action.now ?? 'now',
           },
         ],
       }
     }
+    case 'message.retry':
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === action.messageId && message.own && !message.deleted
+            ? {
+                ...message,
+                deliveryError: null,
+                deliveryStatus: 'sending',
+                time: action.now ?? message.time,
+              }
+            : message,
+        ),
+      }
+    case 'message.edit': {
+      const content = action.content.trim()
+      if (!content) {
+        return state
+      }
+
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === action.messageId && message.own && !message.deleted
+            ? {
+                ...message,
+                content,
+                deliveryError: null,
+                deliveryStatus: 'sent',
+                edited: true,
+                editedAt: action.now ?? 'now',
+                mentions: mobileMentionTokens(content),
+              }
+            : message,
+        ),
+      }
+    }
+    case 'message.delete':
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === action.messageId && message.own && !message.deleted
+            ? {
+                ...message,
+                content: '',
+                deleted: true,
+                deliveryError: null,
+                deliveryStatus: 'sent',
+                embeds: [],
+                mentions: [],
+                reactions: [],
+              }
+            : message,
+        ),
+      }
+    case 'message.pin':
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === action.messageId && !message.deleted
+            ? {
+                ...message,
+                pinned: action.pinned,
+              }
+            : message,
+        ),
+      }
+    case 'message.react':
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === action.messageId && !message.deleted
+            ? {
+                ...message,
+                reactions: applyMobileReaction(message.reactions ?? [], action.emoji),
+              }
+            : message,
+        ),
+      }
     case 'realtime.status_changed':
       return {
         ...state,
@@ -817,6 +973,131 @@ export function messagesForChannel(state: MobileAppState, channelId = state.sele
   return state.messages.filter((message) => message.channelId === channelId)
 }
 
+export function mobileMessageTimelineGroups(
+  state: MobileAppState,
+  channelId = state.selectedChannelId,
+): MobileMessageTimelineGroup[] {
+  const groups: MobileMessageTimelineGroup[] = []
+
+  for (const message of messagesForChannel(state, channelId)) {
+    const currentGroup = groups.at(-1)
+    if (
+      currentGroup &&
+      currentGroup.authorName === message.authorName &&
+      currentGroup.own === message.own
+    ) {
+      currentGroup.messages.push(message)
+      continue
+    }
+
+    groups.push({
+      id: `group-${message.id}`,
+      authorName: message.authorName,
+      own: message.own,
+      messages: [message],
+    })
+  }
+
+  return groups
+}
+
+export function mobileComposerState(
+  state: MobileAppState,
+  content: string,
+  {
+    editTargetMessageId,
+    replyTargetMessageId,
+  }: {
+    editTargetMessageId?: string | null
+    replyTargetMessageId?: string | null
+  } = {},
+): MobileComposerUiState {
+  const channel = selectedChannel(state)
+  const mode = editTargetMessageId ? 'edit' : replyTargetMessageId ? 'reply' : 'send'
+  const placeholder =
+    mode === 'edit'
+      ? 'Edit message'
+      : mode === 'reply'
+        ? `Reply in #${channel.name}`
+        : `Message #${channel.name}`
+
+  if (channel.kind !== 'text') {
+    return {
+      canSend: false,
+      disabledReason: 'Text messages can be sent only in text channels.',
+      mode,
+      placeholder,
+    }
+  }
+
+  if (!content.trim()) {
+    return {
+      canSend: false,
+      disabledReason: 'Write a message before sending.',
+      mode,
+      placeholder,
+    }
+  }
+
+  return {
+    canSend: true,
+    disabledReason: null,
+    mode,
+    placeholder,
+  }
+}
+
+export function mobileMessageActionSheetOptions(
+  state: MobileAppState,
+  messageId: string,
+): MobileMessageActionOption[] {
+  const message = state.messages.find((candidate) => candidate.id === messageId)
+  if (!message || message.deleted) {
+    return []
+  }
+
+  if (message.own) {
+    return [
+      { id: 'reply', label: 'Reply' },
+      { id: 'edit', label: 'Edit' },
+      { id: 'delete', label: 'Delete', destructive: true },
+      { id: 'copy', label: 'Copy text' },
+      { id: 'pin', label: message.pinned ? 'Unpin' : 'Pin' },
+      { id: 'react', label: 'React' },
+    ]
+  }
+
+  return [
+    { id: 'reply', label: 'Reply' },
+    { id: 'copy', label: 'Copy text' },
+    { id: 'pin', label: message.pinned ? 'Unpin' : 'Pin' },
+    { id: 'react', label: 'React' },
+    { id: 'report', label: 'Report', destructive: true },
+  ]
+}
+
+export function mobileMentionTokens(content: string): MobileMentionToken[] {
+  const tokens: MobileMentionToken[] = []
+  const mentionPattern = /(^|[\s([{])@([A-Za-z0-9][A-Za-z0-9_-]{0,31})/g
+  let match: RegExpExecArray | null
+
+  while ((match = mentionPattern.exec(content)) !== null) {
+    const prefix = match[1] ?? ''
+    const display = match[2] ?? ''
+    const start = match.index + prefix.length
+    const end = start + display.length + 1
+
+    tokens.push({
+      display,
+      query: display.toLowerCase(),
+      start,
+      end,
+    })
+  }
+
+  return tokens
+}
+
 export function mobileMediaPermissionRows(state: MobileAppState): MobileMediaPermissionRow[] {
   return mediaPermissionRows.map((row) => {
     const status = state.mediaPermissions[row.kind]
@@ -1111,6 +1392,26 @@ function applyMobileMediaPermissionRevocation(
       participants,
     },
   }
+}
+
+function applyMobileReaction(
+  reactions: MobileMessageReaction[],
+  emoji: string,
+): MobileMessageReaction[] {
+  const existing = reactions.find((reaction) => reaction.emoji === emoji)
+  if (!existing) {
+    return [...reactions, { emoji, count: 1, selfReacted: true }]
+  }
+
+  return reactions.map((reaction) =>
+    reaction.emoji === emoji
+      ? {
+          ...reaction,
+          count: reaction.selfReacted ? reaction.count : reaction.count + 1,
+          selfReacted: true,
+        }
+      : reaction,
+  )
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

@@ -9,6 +9,10 @@ import {
   mobileCanListenToVoice,
   mobileCanSpeakInVoice,
   mobileChannelsFromApiChannels,
+  mobileComposerState,
+  mobileMentionTokens,
+  mobileMessageActionSheetOptions,
+  mobileMessageTimelineGroups,
   mobileMediaPermissionRows,
   mobileReducer,
   mobileRouteTargetForChannel,
@@ -193,7 +197,181 @@ describe('mobile app state', () => {
       content: 'Hello from mobile',
       embeds: [],
       own: true,
+      deliveryStatus: 'sent',
     })
+  })
+
+  it('groups mobile chat messages by consecutive author for dense timelines', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inGeneral = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'general' })
+    const first = mobileReducer(inGeneral, {
+      type: 'message.send',
+      clientId: 'local-first',
+      content: 'First mobile update',
+      now: '09:20',
+    })
+    const second = mobileReducer(first, {
+      type: 'message.send',
+      clientId: 'local-second',
+      content: 'Second mobile update',
+      now: '09:21',
+    })
+
+    expect(mobileMessageTimelineGroups(second).at(-1)).toEqual({
+      id: 'group-local-first',
+      authorName: 'You',
+      own: true,
+      messages: [
+        expect.objectContaining({
+          id: 'local-first',
+          content: 'First mobile update',
+        }),
+        expect.objectContaining({
+          id: 'local-second',
+          content: 'Second mobile update',
+        }),
+      ],
+    })
+  })
+
+  it('models composer disabled states for empty text and non-text channels', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inGeneral = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'general' })
+    const inVoice = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'standup' })
+
+    expect(mobileComposerState(inGeneral, '   ')).toEqual({
+      canSend: false,
+      disabledReason: 'Write a message before sending.',
+      mode: 'send',
+      placeholder: 'Message #general',
+    })
+    expect(mobileComposerState(inGeneral, 'Ship mobile chat')).toEqual({
+      canSend: true,
+      disabledReason: null,
+      mode: 'send',
+      placeholder: 'Message #general',
+    })
+    expect(mobileComposerState(inVoice, 'Hello voice')).toEqual({
+      canSend: false,
+      disabledReason: 'Text messages can be sent only in text channels.',
+      mode: 'send',
+      placeholder: 'Message #standup',
+    })
+  })
+
+  it('supports mobile send retry, reply, edit, delete, pin, and react actions', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inGeneral = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'general' })
+    const failedSend = mobileReducer(inGeneral, {
+      type: 'message.send',
+      clientId: 'local-failed',
+      content: 'Needs retry',
+      deliveryStatus: 'failed',
+      errorMessage: 'Network unavailable',
+      now: '09:20',
+      replyToMessageId: 'seed-1',
+    })
+    const retried = mobileReducer(failedSend, {
+      type: 'message.retry',
+      messageId: 'local-failed',
+      now: '09:21',
+    })
+    const edited = mobileReducer(retried, {
+      type: 'message.edit',
+      messageId: 'local-failed',
+      content: 'Retry succeeded',
+      now: '09:22',
+    })
+    const pinned = mobileReducer(edited, {
+      type: 'message.pin',
+      messageId: 'local-failed',
+      pinned: true,
+    })
+    const reacted = mobileReducer(pinned, {
+      type: 'message.react',
+      messageId: 'local-failed',
+      emoji: '✅',
+    })
+    const deleted = mobileReducer(reacted, {
+      type: 'message.delete',
+      messageId: 'local-failed',
+    })
+
+    expect(failedSend.messages.at(-1)).toMatchObject({
+      id: 'local-failed',
+      deliveryStatus: 'failed',
+      deliveryError: 'Network unavailable',
+      replyToMessageId: 'seed-1',
+    })
+    expect(retried.messages.at(-1)).toMatchObject({
+      deliveryStatus: 'sending',
+      deliveryError: null,
+      time: '09:21',
+    })
+    expect(edited.messages.at(-1)).toMatchObject({
+      content: 'Retry succeeded',
+      deliveryStatus: 'sent',
+      edited: true,
+      editedAt: '09:22',
+    })
+    expect(reacted.messages.at(-1)).toMatchObject({
+      pinned: true,
+      reactions: [{ emoji: '✅', count: 1, selfReacted: true }],
+    })
+    expect(deleted.messages.at(-1)).toMatchObject({
+      content: '',
+      deleted: true,
+      deliveryStatus: 'sent',
+    })
+  })
+
+  it('exposes long-press action sheet options based on ownership', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inGeneral = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'general' })
+    const withOwnMessage = mobileReducer(inGeneral, {
+      type: 'message.send',
+      clientId: 'local-owned',
+      content: 'Own mobile message',
+    })
+
+    expect(mobileMessageActionSheetOptions(withOwnMessage, 'local-owned').map((option) => option.id)).toEqual([
+      'reply',
+      'edit',
+      'delete',
+      'copy',
+      'pin',
+      'react',
+    ])
+    expect(mobileMessageActionSheetOptions(withOwnMessage, 'seed-1').map((option) => option.id)).toEqual([
+      'reply',
+      'copy',
+      'pin',
+      'react',
+      'report',
+    ])
+  })
+
+  it('extracts mention tokens for mobile composer insertion and rendering', () => {
+    expect(mobileMentionTokens('Ship with @Mira and @backend-team today')).toEqual([
+      { display: 'Mira', query: 'mira', start: 10, end: 15 },
+      { display: 'backend-team', query: 'backend-team', start: 20, end: 33 },
+    ])
   })
 
   it('receives realtime channel messages and marks unopened channels unread', () => {

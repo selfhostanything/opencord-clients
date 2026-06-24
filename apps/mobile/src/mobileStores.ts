@@ -50,6 +50,7 @@ export type MobileChatStore = {
   unreadChannelIds: string[]
   beginEdit: (target: MobileMessageTarget) => void
   beginReply: (target: MobileMessageTarget) => void
+  clearDraftTarget: () => void
   clearChannelUnread: (channelId: string) => void
   clearComposer: (channelId: string) => void
   markChannelUnread: (channelId: string) => void
@@ -113,6 +114,7 @@ const initialChatData = {
   MobileChatStore,
   | 'beginEdit'
   | 'beginReply'
+  | 'clearDraftTarget'
   | 'clearChannelUnread'
   | 'clearComposer'
   | 'markChannelUnread'
@@ -168,8 +170,12 @@ export const useMobileSessionStore = create<MobileSessionStore>((set) => ({
 
 export const useMobileChatStore = create<MobileChatStore>((set) => ({
   ...initialChatData,
-  beginEdit: (editTarget) => set({ editTarget, messageActionSheetTarget: null }),
-  beginReply: (replyTarget) => set({ messageActionSheetTarget: null, replyTarget }),
+  beginEdit: (editTarget) =>
+    set({ editTarget, messageActionSheetTarget: null, replyTarget: null }),
+  beginReply: (replyTarget) =>
+    set({ editTarget: null, messageActionSheetTarget: null, replyTarget }),
+  clearDraftTarget: () =>
+    set({ editTarget: null, messageActionSheetTarget: null, replyTarget: null }),
   clearChannelUnread: (channelId) =>
     set((state) => ({
       unreadChannelIds: state.unreadChannelIds.filter((id) => id !== channelId),

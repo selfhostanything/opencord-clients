@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native'
 import { RTCView } from '@livekit/react-native-webrtc'
+import Clipboard from '@react-native-clipboard/clipboard'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   createOpenCordApiClient,
@@ -33,14 +34,20 @@ import {
   mobileChannelsFromApiChannels,
   mobileCanListenToVoice,
   mobileCanSpeakInVoice,
+  mobileComposerState,
+  mobileMentionTokens,
+  mobileMessageActionSheetOptions,
+  mobileMessageTimelineGroups,
   mobileMediaPermissionRows,
   mobileRouteTargetForChannel,
   mobileWorkspaceNavigatorSections,
-  messagesForChannel,
   mobileReducer,
   mobileVoiceParticipantsForChannel,
   selectedChannel,
   type MobileChannel,
+  type MobileMessageActionId,
+  type MobileMessageActionOption,
+  type MobileMessageTimelineGroup,
   type MobileMediaPermissionKind,
   type MobileMediaPermissionRow,
   type MobileMessage,
@@ -49,6 +56,7 @@ import {
   type MobileVoiceParticipant,
 } from './src/mobileState'
 import {
+  useMobileChatStore,
   useMobileSessionStore,
   useMobileSettingsStore,
 } from './src/mobileStores'
@@ -109,6 +117,16 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const lastE2ECommandIdRef = useRef<string | null>(null)
   const voiceSessionRef = useRef<NativeLiveKitVoiceSession | null>(null)
   const stateRef = useRef(state)
+  const beginMobileEdit = useMobileChatStore((store) => store.beginEdit)
+  const beginMobileReply = useMobileChatStore((store) => store.beginReply)
+  const clearMobileComposer = useMobileChatStore((store) => store.clearComposer)
+  const clearMobileDraftTarget = useMobileChatStore((store) => store.clearDraftTarget)
+  const composerTextByChannelId = useMobileChatStore((store) => store.composerTextByChannelId)
+  const editTarget = useMobileChatStore((store) => store.editTarget)
+  const messageActionSheetTarget = useMobileChatStore((store) => store.messageActionSheetTarget)
+  const openMobileMessageActions = useMobileChatStore((store) => store.openMessageActions)
+  const replyTarget = useMobileChatStore((store) => store.replyTarget)
+  const setMobileComposerText = useMobileChatStore((store) => store.setComposerText)
   const setMobileAccountMetadata = useMobileSessionStore((store) => store.setAccountMetadata)
   const setMobileRouteTarget = useMobileSessionStore((store) => store.setRouteTarget)
   const openMobileSettingsPanel = useMobileSettingsStore((store) => store.openPanel)
@@ -117,14 +135,43 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginStatus, setLoginStatus] = useState<'idle' | 'loading'>('idle')
-  const [composerText, setComposerText] = useState('')
+  const [chatFeedback, setChatFeedback] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [serverManagerOpen, setServerManagerOpen] = useState(false)
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
-  const visibleMessages = useMemo(() => messagesForChannel(state), [state])
+  const composerText = composerTextByChannelId[state.selectedChannelId] ?? ''
+  const timelineGroups = useMemo(() => mobileMessageTimelineGroups(state), [state])
   const permissionRows = useMemo(() => mobileMediaPermissionRows(state), [state])
   const workspaceSections = useMemo(() => mobileWorkspaceNavigatorSections(state), [state])
+  const replyPreviewMessage = replyTarget
+    ? state.messages.find((message) => message.id === replyTarget.messageId)
+    : null
+  const editTargetMessage = editTarget
+    ? state.messages.find((message) => message.id === editTarget.messageId)
+    : null
+  const messageActionSheetMessage = messageActionSheetTarget
+    ? state.messages.find((message) => message.id === messageActionSheetTarget.messageId)
+    : null
+  const messageActionSheetOptions = useMemo(
+    () =>
+      messageActionSheetMessage
+        ? mobileMessageActionSheetOptions(state, messageActionSheetMessage.id)
+        : [],
+    [messageActionSheetMessage, state],
+  )
+  const composerUi = useMemo(
+    () =>
+      mobileComposerState(state, composerText, {
+        editTargetMessageId: editTarget?.messageId,
+        replyTargetMessageId: replyTarget?.messageId,
+      }),
+    [composerText, editTarget?.messageId, replyTarget?.messageId, state],
+  )
+  const composerDisabledReason =
+    composerUi.disabledReason === 'Write a message before sending.'
+      ? null
+      : composerUi.disabledReason
   const activeVoiceChannel = state.channels.find(
     (channel) => channel.id === state.voice.connectedChannelId,
   )
@@ -485,8 +532,66 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   }
 
   function sendMessage() {
-    dispatch({ type: 'message.send', content: composerText })
-    setComposerText('')
+    if (!composerUi.canSend) {
+      return
+    }
+
+    if (editTarget?.messageId) {
+      dispatch({
+        type: 'message.edit',
+        messageId: editTarget.messageId,
+        content: composerText,
+      })
+    } else {
+      dispatch({
+        type: 'message.send',
+        content: composerText,
+        replyToMessageId: replyTarget?.messageId,
+      })
+    }
+    clearMobileComposer(state.selectedChannelId)
+    clearMobileDraftTarget()
+    setChatFeedback(null)
+  }
+
+  function handleMessageAction(actionId: MobileMessageActionId, message: MobileMessage) {
+    const target = { channelId: message.channelId, messageId: message.id }
+
+    switch (actionId) {
+      case 'reply':
+        beginMobileReply(target)
+        setChatFeedback(null)
+        break
+      case 'edit':
+        if (message.own && !message.deleted) {
+          beginMobileEdit(target)
+          setMobileComposerText(message.channelId, message.content)
+          setChatFeedback(null)
+        }
+        break
+      case 'delete':
+        dispatch({ type: 'message.delete', messageId: message.id })
+        clearMobileDraftTarget()
+        setChatFeedback('Message deleted.')
+        break
+      case 'copy':
+        Clipboard.setString(message.content)
+        setChatFeedback('Message text copied.')
+        break
+      case 'pin':
+        dispatch({ type: 'message.pin', messageId: message.id, pinned: !message.pinned })
+        setChatFeedback(message.pinned ? 'Message unpinned.' : 'Message pinned.')
+        break
+      case 'react':
+        dispatch({ type: 'message.react', messageId: message.id, emoji: '✅' })
+        setChatFeedback('Reaction added.')
+        break
+      case 'report':
+        setChatFeedback('Report saved for moderation review.')
+        break
+    }
+
+    openMobileMessageActions(null)
   }
 
   async function requestPermission(kind: MobileMediaPermissionKind) {
@@ -792,19 +897,22 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
           <View style={styles.channelDrawer}>
             <View style={styles.drawerHeader}>
               <View style={styles.drawerTitleBlock}>
-                <Text style={styles.title}>Channels</Text>
+                <Text numberOfLines={1} style={styles.title}>
+                  {activeServer?.displayName ?? 'OpenCord'}
+                </Text>
                 <Text numberOfLines={1} style={styles.subtle}>
-                  {activeServer?.displayName ?? state.serverUrl}
+                  {state.serverUrl.replace(/^https?:\/\//, '')}
                 </Text>
               </View>
               <View style={styles.drawerHeaderActions}>
                 <Text style={styles.status}>{state.realtimeStatus}</Text>
                 <Pressable
+                  accessibilityLabel="Open voice and video settings"
                   accessibilityRole="button"
                   onPress={toggleVoiceSettings}
-                  style={styles.iconButton}
+                  style={styles.drawerIconButton}
                 >
-                  <Text style={styles.iconButtonText}>Voice</Text>
+                  <Text style={styles.iconOnlyButtonText}>⚙</Text>
                 </Pressable>
               </View>
             </View>
@@ -848,6 +956,19 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
               onToggleDeaf={toggleDeaf}
               onToggleMute={toggleMute}
             />
+            <MobileAccountBar
+              accountName={state.account?.displayName ?? 'OpenCord'}
+              email={state.account?.email ?? activeServer?.baseUrl ?? state.serverUrl}
+              onOpenSettings={() => {
+                openMobileSettingsPanel('account')
+                setSettingsOpen(true)
+              }}
+              onToggleDeaf={toggleDeaf}
+              onToggleMute={toggleMute}
+              selfDeaf={state.voice.selfDeaf}
+              selfMute={state.voice.selfMute}
+              voiceConnected={Boolean(state.voice.connectedChannelId)}
+            />
           </View>
         </View>
       </View>
@@ -857,26 +978,14 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   return (
     <View style={shellStyle}>
       <StatusBar backgroundColor="#151515" barStyle="light-content" />
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" onPress={() => dispatch({ type: 'channel.back' })}>
-          <Text style={styles.linkText}>Channels</Text>
-        </Pressable>
-        <View style={styles.channelTitleBlock}>
-          <Text style={styles.title}># {activeChannel.name}</Text>
-          <Text style={styles.subtle}>{activeChannel.topic}</Text>
-        </View>
-        <View style={styles.channelHeaderActions}>
-          <HeaderActionButton label="Search" onPress={() => undefined} />
-          <HeaderActionButton label="Members" onPress={() => undefined} />
-          <HeaderActionButton
-            label="Settings"
-            onPress={() => {
-              openMobileSettingsPanel('account')
-              setSettingsOpen(true)
-            }}
-          />
-        </View>
-      </View>
+      <MobileChatHeader
+        channel={activeChannel}
+        onBack={() => dispatch({ type: 'channel.back' })}
+        onOpenSettings={() => {
+          openMobileSettingsPanel('account')
+          setSettingsOpen(true)
+        }}
+      />
       {settingsOpen ? (
         <PermissionSettingsPanel
           maxHeight={permissionPanelMaxHeight}
@@ -886,12 +995,28 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         />
       ) : null}
       <FlatList
-        data={visibleMessages}
-        keyExtractor={(message) => message.id}
-        renderItem={({ item }) => <MessageBubble message={item} />}
+        data={timelineGroups}
+        keyExtractor={(group) => group.id}
+        renderItem={({ item }) => (
+          <MessageGroup
+            group={item}
+            onLongPress={(message) =>
+              openMobileMessageActions({ channelId: message.channelId, messageId: message.id })
+            }
+            onRetry={(messageId) => dispatch({ type: 'message.retry', messageId })}
+          />
+        )}
         style={styles.flexList}
         contentContainerStyle={styles.timeline}
       />
+      {messageActionSheetMessage ? (
+        <MessageActionSheet
+          message={messageActionSheetMessage}
+          onAction={handleMessageAction}
+          onClose={() => openMobileMessageActions(null)}
+          options={messageActionSheetOptions}
+        />
+      ) : null}
       <MobileVoiceTray
         channelName={activeVoiceRoomName}
         canListen={mobileCanListenToVoice(state)}
@@ -907,17 +1032,49 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         onToggleDeaf={toggleDeaf}
         onToggleMute={toggleMute}
       />
+      {replyPreviewMessage || editTargetMessage || chatFeedback || composerDisabledReason ? (
+        <View style={styles.composerContext}>
+          {replyPreviewMessage ? (
+            <ComposerContextRow
+              label={`Replying to ${replyPreviewMessage.authorName}`}
+              onClear={clearMobileDraftTarget}
+              value={replyPreviewMessage.content || 'Attachment or embed'}
+            />
+          ) : null}
+          {editTargetMessage ? (
+            <ComposerContextRow
+              label="Editing message"
+              onClear={clearMobileDraftTarget}
+              value={editTargetMessage.content}
+            />
+          ) : null}
+          {chatFeedback ? <Text style={styles.composerFeedback}>{chatFeedback}</Text> : null}
+          {composerDisabledReason ? (
+            <Text style={styles.composerDisabledReason}>{composerDisabledReason}</Text>
+          ) : null}
+        </View>
+      ) : null}
       <View style={styles.composer}>
+        <Pressable accessibilityLabel="Add attachment" accessibilityRole="button" style={styles.composerIconButton}>
+          <Text style={styles.composerIconText}>+</Text>
+        </Pressable>
         <TextInput
           accessibilityLabel="Message composer"
-          onChangeText={setComposerText}
-          placeholder={`Message #${activeChannel.name}`}
+          onChangeText={(value) => setMobileComposerText(state.selectedChannelId, value)}
+          placeholder={composerUi.placeholder}
           placeholderTextColor="#7f877d"
           style={styles.composerInput}
           value={composerText}
         />
-        <Pressable accessibilityRole="button" onPress={sendMessage} style={styles.sendButton}>
-          <Text style={styles.primaryButtonText}>Send</Text>
+        <Pressable
+          accessibilityRole="button"
+          disabled={!composerUi.canSend}
+          onPress={sendMessage}
+          style={[styles.sendButton, !composerUi.canSend ? styles.disabledSendButton : null]}
+        >
+          <Text style={styles.primaryButtonText}>
+            {composerUi.mode === 'edit' ? 'Save' : '↑'}
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -1034,7 +1191,7 @@ function WorkspaceNavigator({
     <ScrollView contentContainerStyle={styles.navigatorContent} style={styles.flexList}>
       {sections.map((section) => (
         <View key={section.id} style={styles.navigatorSection}>
-          <Text style={styles.sectionTitle}>{section.title}</Text>
+          <Text style={styles.sectionTitle}>{mobileSectionTitle(section.title)}</Text>
           {section.channels.map((channel) => (
             <ChannelRow
               channel={channel}
@@ -1048,11 +1205,102 @@ function WorkspaceNavigator({
   )
 }
 
-function HeaderActionButton({ label, onPress }: { label: string; onPress: () => void }) {
+function MobileChatHeader({
+  channel,
+  onBack,
+  onOpenSettings,
+}: {
+  channel: MobileChannel
+  onBack: () => void
+  onOpenSettings: () => void
+}) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.headerActionButton}>
-      <Text style={styles.headerActionText}>{label}</Text>
+    <View style={styles.chatHeader}>
+      <IconButton accessibilityLabel="Open channel list" icon="‹" onPress={onBack} />
+      <View style={styles.channelTitleBlock}>
+        <Text numberOfLines={1} style={styles.chatTitle}>
+          # {channel.name}
+        </Text>
+        <Text numberOfLines={1} style={styles.chatSubtitle}>
+          {channel.topic}
+        </Text>
+      </View>
+      <View style={styles.channelHeaderActions}>
+        <IconButton accessibilityLabel="Search messages" icon="⌕" onPress={() => undefined} />
+        <IconButton accessibilityLabel="Open members" icon="@" onPress={() => undefined} />
+        <IconButton accessibilityLabel="Open channel settings" icon="⚙" onPress={onOpenSettings} />
+      </View>
+    </View>
+  )
+}
+
+function IconButton({
+  accessibilityLabel,
+  icon,
+  onPress,
+}: {
+  accessibilityLabel: string
+  icon: string
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.iconOnlyButton}
+    >
+      <Text style={styles.iconOnlyButtonText}>{icon}</Text>
     </Pressable>
+  )
+}
+
+function MobileAccountBar({
+  accountName,
+  email,
+  onOpenSettings,
+  onToggleDeaf,
+  onToggleMute,
+  selfDeaf,
+  selfMute,
+  voiceConnected,
+}: {
+  accountName: string
+  email: string
+  onOpenSettings: () => void
+  onToggleDeaf: () => void
+  onToggleMute: () => void
+  selfDeaf: boolean
+  selfMute: boolean
+  voiceConnected: boolean
+}) {
+  return (
+    <View style={styles.accountBar}>
+      <View style={styles.accountAvatar}>
+        <Text style={styles.accountAvatarText}>{initialsForLabel(accountName)}</Text>
+      </View>
+      <View style={styles.accountCopy}>
+        <Text numberOfLines={1} style={styles.accountName}>
+          {accountName}
+        </Text>
+        <Text numberOfLines={1} style={styles.accountStatus}>
+          {voiceConnected ? 'Voice connected' : email}
+        </Text>
+      </View>
+      <View style={styles.accountActions}>
+        <IconButton
+          accessibilityLabel={selfMute ? 'Unmute microphone' : 'Mute microphone'}
+          icon={selfMute ? 'M' : 'm'}
+          onPress={onToggleMute}
+        />
+        <IconButton
+          accessibilityLabel={selfDeaf ? 'Undeafen' : 'Deafen'}
+          icon={selfDeaf ? 'D' : 'd'}
+          onPress={onToggleDeaf}
+        />
+        <IconButton accessibilityLabel="Open account settings" icon="⚙" onPress={onOpenSettings} />
+      </View>
+    </View>
   )
 }
 
@@ -1070,9 +1318,12 @@ function ChannelRow({
       onPress={onPress}
       style={[styles.channelRow, channel.selected ? styles.selectedChannelRow : null]}
     >
+      <View style={[styles.channelGlyph, channel.selected ? styles.selectedChannelGlyph : null]}>
+        <Text style={styles.channelGlyphText}>{channel.kind === 'voice' ? 'V' : '#'}</Text>
+      </View>
       <View style={styles.channelRowCopy}>
         <Text style={styles.channelName}>
-          {channel.kind === 'voice' ? 'V' : '#'} {channel.name}
+          {channel.name}
         </Text>
         <Text style={styles.subtle}>{channel.topic}</Text>
       </View>
@@ -1176,17 +1427,45 @@ function MobileVoiceTray({
 
   return (
     <View style={styles.voiceTray}>
-      <View style={styles.voiceSummary}>
-        <Text style={styles.voiceTitle}>{voiceStatusLabel(status)}</Text>
-        <Text style={styles.subtle}>{channelName}</Text>
-        <Text style={styles.subtle}>
-          {canListen ? 'Listening' : 'Deafened'} / {canSpeak ? 'Speaking' : 'Muted'}
-        </Text>
-        {remoteScreenShares > 0 ? (
-          <Text style={styles.subtle}>Watching {remoteScreenShares} screen share</Text>
-        ) : null}
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+      <View style={styles.voiceTrayTopRow}>
+        <View style={styles.voiceSummary}>
+          <Text style={styles.voiceTitle}>{voiceStatusLabel(status)}</Text>
+          <Text numberOfLines={1} style={styles.subtle}>
+            {channelName}
+          </Text>
+        </View>
+        <View style={styles.voiceActions}>
+          <Pressable
+            accessibilityLabel={selfMute ? 'Unmute microphone' : 'Mute microphone'}
+            accessibilityRole="button"
+            onPress={onToggleMute}
+            style={styles.voiceIconButton}
+          >
+            <Text style={styles.headerActionText}>{selfMute ? 'M' : 'm'}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel={selfDeaf ? 'Undeafen' : 'Deafen'}
+            accessibilityRole="button"
+            onPress={onToggleDeaf}
+            style={styles.voiceIconButton}
+          >
+            <Text style={styles.headerActionText}>{selfDeaf ? 'D' : 'd'}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Leave voice"
+            accessibilityRole="button"
+            onPress={onLeave}
+            style={[styles.voiceIconButton, styles.leaveVoiceButton]}
+          >
+            <Text style={styles.headerActionText}>×</Text>
+          </Pressable>
+        </View>
       </View>
+      <Text style={styles.voiceCompactStatus}>
+        {canListen ? 'Listening' : 'Deafened'} / {canSpeak ? 'Speaking' : 'Muted'}
+        {remoteScreenShares > 0 ? ` / ${remoteScreenShares} screen share` : ''}
+      </Text>
+      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
       <RemoteScreenShareStrip streams={remoteScreenShareStreams} />
       <View style={styles.voiceParticipants}>
         {participants.map((participant) => (
@@ -1195,17 +1474,6 @@ function MobileVoiceTray({
             {participant.self ? voiceSelfStatus(selfMute, selfDeaf) : participant.status}
           </Text>
         ))}
-      </View>
-      <View style={styles.voiceActions}>
-        <Pressable accessibilityRole="button" onPress={onToggleMute} style={styles.voiceButton}>
-          <Text style={styles.primaryButtonText}>{selfMute ? 'Unmute' : 'Mute'}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={onToggleDeaf} style={styles.voiceButton}>
-          <Text style={styles.primaryButtonText}>{selfDeaf ? 'Undeaf' : 'Deaf'}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={onLeave} style={styles.voiceButton}>
-          <Text style={styles.primaryButtonText}>Leave</Text>
-        </Pressable>
       </View>
     </View>
   )
@@ -1281,13 +1549,212 @@ function voiceSelfStatus(selfMute: boolean, selfDeaf: boolean) {
   return 'connected'
 }
 
-function MessageBubble({ message }: { message: MobileMessage }) {
+function MessageGroup({
+  group,
+  onLongPress,
+  onRetry,
+}: {
+  group: MobileMessageTimelineGroup
+  onLongPress: (message: MobileMessage) => void
+  onRetry: (messageId: string) => void
+}) {
   return (
-    <View style={[styles.message, message.own ? styles.ownMessage : null]}>
-      <Text style={styles.messageAuthor}>{message.authorName}</Text>
-      {message.content ? <Text style={styles.messageContent}>{message.content}</Text> : null}
+    <View style={[styles.messageGroup, group.own ? styles.ownMessageGroup : null]}>
+      <View style={styles.messageAvatar}>
+        <Text style={styles.messageAvatarText}>{initialsForLabel(group.authorName)}</Text>
+      </View>
+      <View style={styles.messageGroupBody}>
+        <View style={styles.messageGroupHeader}>
+          <Text style={styles.messageAuthor}>{group.authorName}</Text>
+          <Text style={styles.messageTime}>{group.messages[0]?.time}</Text>
+        </View>
+        {group.messages.map((message) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            onLongPress={() => onLongPress(message)}
+            onRetry={() => onRetry(message.id)}
+          />
+        ))}
+      </View>
+    </View>
+  )
+}
+
+function MessageBubble({
+  message,
+  onLongPress,
+  onRetry,
+}: {
+  message: MobileMessage
+  onLongPress: () => void
+  onRetry: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={`Message from ${message.authorName}`}
+      accessibilityRole="button"
+      onLongPress={onLongPress}
+      style={[styles.message, message.own ? styles.ownMessage : null]}
+    >
+      {message.replyToMessageId ? (
+        <Text style={styles.replyPreview}>Replying to {message.replyToMessageId}</Text>
+      ) : null}
+      {message.pinned ? <Text style={styles.messageMeta}>Pinned</Text> : null}
+      {message.deleted ? (
+        <Text style={styles.deletedMessage}>Message deleted</Text>
+      ) : message.content ? (
+        <MessageContentText content={message.content} />
+      ) : null}
       <MobileRichEmbedList embeds={message.embeds} />
-      <Text style={styles.messageTime}>{message.time}</Text>
+      {message.edited ? <Text style={styles.messageMeta}>edited</Text> : null}
+      {message.deliveryStatus && message.deliveryStatus !== 'sent' ? (
+        <View style={styles.deliveryRow}>
+          <Text style={message.deliveryStatus === 'failed' ? styles.errorText : styles.subtle}>
+            {message.deliveryStatus === 'failed'
+              ? message.deliveryError ?? 'Unable to send.'
+              : 'Sending...'}
+          </Text>
+          {message.deliveryStatus === 'failed' ? (
+            <Pressable accessibilityRole="button" onPress={onRetry} style={styles.retryButton}>
+              <Text style={styles.headerActionText}>Retry</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+      {message.reactions && message.reactions.length > 0 ? (
+        <View style={styles.reactionRow}>
+          {message.reactions.map((reaction) => (
+            <Text key={reaction.emoji} style={styles.reactionPill}>
+              {reaction.emoji} {reaction.count}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+    </Pressable>
+  )
+}
+
+function MessageContentText({ content }: { content: string }) {
+  const mentions = mobileMentionTokens(content)
+  if (mentions.length === 0) {
+    return <Text style={styles.messageContent}>{content}</Text>
+  }
+
+  const segments: Array<{ kind: 'text' | 'mention'; value: string }> = []
+  let cursor = 0
+  for (const mention of mentions) {
+    if (mention.start > cursor) {
+      segments.push({ kind: 'text', value: content.slice(cursor, mention.start) })
+    }
+    segments.push({ kind: 'mention', value: content.slice(mention.start, mention.end) })
+    cursor = mention.end
+  }
+  if (cursor < content.length) {
+    segments.push({ kind: 'text', value: content.slice(cursor) })
+  }
+
+  return (
+    <Text style={styles.messageContent}>
+      {segments.map((segment, index) => (
+        <Text
+          key={`${segment.kind}-${index}-${segment.value}`}
+          style={segment.kind === 'mention' ? styles.mentionText : null}
+        >
+          {segment.value}
+        </Text>
+      ))}
+    </Text>
+  )
+}
+
+function MessageActionSheet({
+  message,
+  onAction,
+  onClose,
+  options,
+}: {
+  message: MobileMessage
+  onAction: (actionId: MobileMessageActionId, message: MobileMessage) => void
+  onClose: () => void
+  options: MobileMessageActionOption[]
+}) {
+  return (
+    <View style={styles.messageActionSheet}>
+      <View style={styles.sheetHeader}>
+        <View style={styles.actionSheetTitleBlock}>
+          <Text style={styles.sheetTitle}>Message actions</Text>
+          <Text numberOfLines={1} style={styles.subtle}>
+            {message.content || 'Attachment or embed'}
+          </Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeSheetButton}>
+          <Text style={styles.headerActionText}>Close</Text>
+        </Pressable>
+      </View>
+      <View style={styles.messageActionGrid}>
+        {options.map((option) => (
+          <Pressable
+            accessibilityRole="button"
+            key={option.id}
+            onPress={() => onAction(option.id, message)}
+            style={[
+              styles.messageActionRow,
+              option.destructive ? styles.destructiveMessageActionButton : null,
+            ]}
+          >
+            <Text style={styles.messageActionIcon}>{messageActionIcon(option.id)}</Text>
+            <Text style={styles.messageActionLabel}>{option.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  )
+}
+
+function mobileSectionTitle(title: string) {
+  return title.split(' / ').at(-1) ?? title
+}
+
+function messageActionIcon(actionId: MobileMessageActionId) {
+  switch (actionId) {
+    case 'reply':
+      return '↩'
+    case 'edit':
+      return '✎'
+    case 'delete':
+      return '×'
+    case 'copy':
+      return '□'
+    case 'pin':
+      return '⌖'
+    case 'react':
+      return '+'
+    case 'report':
+      return '!'
+  }
+}
+
+function ComposerContextRow({
+  label,
+  onClear,
+  value,
+}: {
+  label: string
+  onClear: () => void
+  value: string
+}) {
+  return (
+    <View style={styles.composerContextRow}>
+      <View style={styles.composerContextCopy}>
+        <Text style={styles.composerContextLabel}>{label}</Text>
+        <Text numberOfLines={1} style={styles.subtle}>
+          {value}
+        </Text>
+      </View>
+      <Pressable accessibilityRole="button" onPress={onClear} style={styles.clearContextButton}>
+        <Text style={styles.headerActionText}>Cancel</Text>
+      </Pressable>
     </View>
   )
 }
@@ -1544,9 +2011,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     justifyContent: 'space-between',
-    minHeight: 68,
+    minHeight: 54,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 6,
   },
   drawerTitleBlock: {
     flex: 1,
@@ -1569,6 +2036,14 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '900',
+  },
+  drawerIconButton: {
+    alignItems: 'center',
+    backgroundColor: '#26272b',
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
   },
   serverRail: {
     alignItems: 'center',
@@ -1751,16 +2226,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   navigatorContent: {
-    gap: 14,
-    padding: 12,
+    gap: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
   },
   navigatorSection: {
     gap: 8,
   },
   sectionTitle: {
-    color: '#aab2a8',
+    color: '#949ba4',
     fontSize: 11,
     fontWeight: '900',
+    paddingHorizontal: 8,
     textTransform: 'uppercase',
   },
   listContent: {
@@ -1769,26 +2246,41 @@ const styles = StyleSheet.create({
   },
   channelRow: {
     alignItems: 'center',
-    backgroundColor: '#202020',
-    borderRadius: 8,
+    backgroundColor: 'transparent',
+    borderRadius: 6,
     flexDirection: 'row',
+    gap: 8,
     justifyContent: 'space-between',
-    minHeight: 72,
-    padding: 14,
+    minHeight: 46,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   selectedChannelRow: {
-    backgroundColor: '#26312f',
-    borderColor: '#28796d',
-    borderWidth: 1,
+    backgroundColor: '#2b2d31',
+  },
+  channelGlyph: {
+    alignItems: 'center',
+    height: 28,
+    justifyContent: 'center',
+    width: 24,
+  },
+  selectedChannelGlyph: {
+    backgroundColor: '#383a40',
+    borderRadius: 6,
+  },
+  channelGlyphText: {
+    color: '#949ba4',
+    fontSize: 18,
+    fontWeight: '900',
   },
   channelRowCopy: {
     flex: 1,
-    gap: 3,
+    gap: 1,
     paddingRight: 8,
   },
   channelName: {
-    color: '#f5f6f3',
-    fontSize: 16,
+    color: '#dbdee1',
+    fontSize: 15,
     fontWeight: '800',
   },
   channelMeta: {
@@ -1828,23 +2320,39 @@ const styles = StyleSheet.create({
   voiceTray: {
     borderTopColor: '#2b2f2d',
     borderTopWidth: 1,
-    gap: 10,
-    padding: 12,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  voiceTrayTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
   },
   voiceSummary: {
+    flex: 1,
     gap: 2,
+    minWidth: 0,
   },
   voiceTitle: {
-    color: '#f5f6f3',
-    fontSize: 15,
-    fontWeight: '800',
+    color: '#86e0bb',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  voiceCompactStatus: {
+    color: '#aab2a8',
+    fontSize: 12,
+    lineHeight: 16,
   },
   voiceParticipants: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 4,
   },
   voiceParticipant: {
     color: '#d8ddd5',
-    fontSize: 13,
+    fontSize: 12,
   },
   screenShareStrip: {
     minHeight: 126,
@@ -1872,15 +2380,41 @@ const styles = StyleSheet.create({
   },
   voiceActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
-  voiceButton: {
+  voiceIconButton: {
     alignItems: 'center',
     backgroundColor: '#2b2b2b',
-    borderRadius: 8,
-    flex: 1,
-    minHeight: 38,
+    borderRadius: 16,
+    height: 32,
     justifyContent: 'center',
+    width: 32,
+  },
+  leaveVoiceButton: {
+    backgroundColor: '#5d2f34',
+  },
+  chatHeader: {
+    alignItems: 'center',
+    borderBottomColor: '#2b2f2d',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 54,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  iconOnlyButton: {
+    alignItems: 'center',
+    backgroundColor: '#26272b',
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  iconOnlyButtonText: {
+    color: '#dbdee1',
+    fontSize: 18,
+    fontWeight: '900',
   },
   linkText: {
     color: '#86e0bb',
@@ -1888,14 +2422,24 @@ const styles = StyleSheet.create({
   },
   channelTitleBlock: {
     flex: 1,
+    minWidth: 0,
+  },
+  chatTitle: {
+    color: '#f2f3f5',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  chatSubtitle: {
+    color: '#949ba4',
+    fontSize: 12,
+    lineHeight: 16,
   },
   channelHeaderActions: {
     alignItems: 'center',
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
+    gap: 4,
     justifyContent: 'flex-end',
-    maxWidth: 168,
+    maxWidth: 116,
   },
   headerActionButton: {
     alignItems: 'center',
@@ -1911,19 +2455,52 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   timeline: {
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 14,
+  },
+  messageGroup: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
     gap: 10,
+  },
+  ownMessageGroup: {
+    flexDirection: 'row',
+  },
+  messageAvatar: {
+    alignItems: 'center',
+    backgroundColor: '#26312f',
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  messageAvatarText: {
+    color: '#86e0bb',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  messageGroupBody: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  messageGroupHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
   message: {
     alignSelf: 'flex-start',
-    backgroundColor: '#202020',
-    borderRadius: 8,
-    maxWidth: '88%',
-    padding: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 4,
+    maxWidth: '100%',
+    paddingHorizontal: 0,
+    paddingVertical: 2,
   },
   ownMessage: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#203e36',
+    alignSelf: 'flex-start',
+    backgroundColor: 'transparent',
   },
   messageAuthor: {
     color: '#f5f6f3',
@@ -1934,7 +2511,62 @@ const styles = StyleSheet.create({
     color: '#edf1ea',
     fontSize: 15,
     lineHeight: 21,
-    marginTop: 4,
+  },
+  mentionText: {
+    backgroundColor: '#243c50',
+    color: '#9bd1ff',
+    fontWeight: '800',
+  },
+  replyPreview: {
+    borderLeftColor: '#86e0bb',
+    borderLeftWidth: 3,
+    color: '#aab2a8',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 6,
+    paddingLeft: 8,
+  },
+  deletedMessage: {
+    color: '#9ea49b',
+    fontSize: 14,
+    fontStyle: 'italic',
+  },
+  messageMeta: {
+    color: '#aab2a8',
+    fontSize: 11,
+    fontWeight: '800',
+    marginTop: 6,
+    textTransform: 'uppercase',
+  },
+  deliveryRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  retryButton: {
+    alignItems: 'center',
+    backgroundColor: '#353535',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 30,
+    paddingHorizontal: 10,
+  },
+  reactionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  reactionPill: {
+    backgroundColor: '#2b2b2b',
+    borderRadius: 12,
+    color: '#f5f6f3',
+    fontSize: 12,
+    fontWeight: '800',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   embedList: {
     gap: 8,
@@ -1993,29 +2625,176 @@ const styles = StyleSheet.create({
   messageTime: {
     color: '#aab2a8',
     fontSize: 11,
-    marginTop: 6,
+  },
+  messageActionSheet: {
+    backgroundColor: '#1f2024',
+    borderTopColor: '#2b2f2d',
+    borderTopWidth: 1,
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+  },
+  actionSheetTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  messageActionGrid: {
+    gap: 6,
+  },
+  messageActionRow: {
+    alignItems: 'center',
+    backgroundColor: '#2b2d31',
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 12,
+  },
+  destructiveMessageActionButton: {
+    backgroundColor: '#5d2f34',
+  },
+  messageActionIcon: {
+    color: '#dbdee1',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'center',
+    width: 22,
+  },
+  messageActionLabel: {
+    color: '#ffffff',
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  composerContext: {
+    borderTopColor: '#2b2f2d',
+    borderTopWidth: 1,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  composerContextRow: {
+    alignItems: 'center',
+    backgroundColor: '#202020',
+    borderLeftColor: '#86e0bb',
+    borderLeftWidth: 3,
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: 8,
+    padding: 10,
+  },
+  composerContextCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  composerContextLabel: {
+    color: '#f5f6f3',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  clearContextButton: {
+    alignItems: 'center',
+    backgroundColor: '#353535',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 32,
+    paddingHorizontal: 10,
+  },
+  composerFeedback: {
+    color: '#86e0bb',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  composerDisabledReason: {
+    color: '#aab2a8',
+    fontSize: 12,
   },
   composer: {
     borderTopColor: '#2b2f2d',
     borderTopWidth: 1,
     flexDirection: 'row',
-    gap: 10,
-    padding: 12,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  composerIconButton: {
+    alignItems: 'center',
+    backgroundColor: '#2b2d31',
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  composerIconText: {
+    color: '#dbdee1',
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 24,
   },
   composerInput: {
-    borderColor: '#333a36',
-    borderRadius: 8,
-    borderWidth: 1,
+    backgroundColor: '#2b2d31',
+    borderRadius: 18,
+    borderWidth: 0,
     color: '#f5f6f3',
     flex: 1,
-    minHeight: 44,
-    paddingHorizontal: 12,
+    minHeight: 36,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
   },
   sendButton: {
     alignItems: 'center',
-    backgroundColor: '#28796d',
-    borderRadius: 8,
+    backgroundColor: '#5865f2',
+    borderRadius: 18,
+    height: 36,
     justifyContent: 'center',
-    minWidth: 72,
+    minWidth: 56,
+    paddingHorizontal: 12,
+  },
+  disabledSendButton: {
+    backgroundColor: '#353535',
+    opacity: 0.65,
+  },
+  accountBar: {
+    alignItems: 'center',
+    backgroundColor: '#1f2024',
+    borderTopColor: '#2b2f2d',
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 58,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  accountAvatar: {
+    alignItems: 'center',
+    backgroundColor: '#5865f2',
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  accountAvatarText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  accountCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  accountName: {
+    color: '#f2f3f5',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  accountStatus: {
+    color: '#949ba4',
+    fontSize: 11,
+  },
+  accountActions: {
+    flexDirection: 'row',
+    gap: 4,
   },
 })

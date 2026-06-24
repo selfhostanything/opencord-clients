@@ -1918,6 +1918,28 @@ PODS:
     - React-utils (= 0.86.0)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.86.0)
+  - RNCClipboard (1.16.3):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - WebRTC-SDK (144.7559.10)
   - Yoga (0.0.0)
 
@@ -2000,6 +2022,7 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios/ReactCodegen`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
+  - "RNCClipboard (from `../node_modules/@react-native-clipboard/clipboard`)"
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
@@ -2162,6 +2185,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   ReactNativeDependencies:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
+  RNCClipboard:
+    :path: "../node_modules/@react-native-clipboard/clipboard"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -2243,6 +2268,7 @@ SPEC CHECKSUMS:
   ReactCodegen: b865894c1b5c94d0e15e0c92ca1f45cf2f8f15e3
   ReactCommon: 4d01bfb533b93a2103329dfefc74db6a9e272888
   ReactNativeDependencies: fa0a54b3f5319ae0e3b9aff32bfee7a424b88e66
+  RNCClipboard: c1cdf3cdd72df606520114f42e61c6898a488dd8
   WebRTC-SDK: 1d7fc2ae91da6edd63e25f3882ff24f86a8d9d8b
   Yoga: 94172d87dd5d83fc929bf1ee53121b5d4490b5f2
 

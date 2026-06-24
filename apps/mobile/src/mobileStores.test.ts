@@ -47,6 +47,7 @@ describe('mobile Zustand stores', () => {
   it('tracks composer, reply/edit state, pending attachments, and unread markers', () => {
     useMobileChatStore.getState().setComposerText('general', 'Ship it')
     useMobileChatStore.getState().beginReply({ channelId: 'general', messageId: 'msg-1' })
+    useMobileChatStore.getState().openMessageActions({ channelId: 'general', messageId: 'msg-1' })
     useMobileChatStore.getState().setPendingAttachments('general', [
       {
         id: 'local-file-1',
@@ -77,8 +78,24 @@ describe('mobile Zustand stores', () => {
           },
         ],
       },
+      messageActionSheetTarget: {
+        channelId: 'general',
+        messageId: 'msg-1',
+      },
       unreadChannelIds: ['backend'],
     })
+
+    useMobileChatStore.getState().beginEdit({ channelId: 'general', messageId: 'msg-2' })
+    expect(useMobileChatStore.getState().editTarget).toEqual({
+      channelId: 'general',
+      messageId: 'msg-2',
+    })
+    expect(useMobileChatStore.getState().replyTarget).toBeNull()
+
+    useMobileChatStore.getState().clearDraftTarget()
+    expect(useMobileChatStore.getState().editTarget).toBeNull()
+    expect(useMobileChatStore.getState().replyTarget).toBeNull()
+    expect(useMobileChatStore.getState().messageActionSheetTarget).toBeNull()
   })
 
   it('tracks voice route, mute/deafen controls, and screen-share watcher state', () => {
