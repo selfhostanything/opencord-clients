@@ -2,9 +2,12 @@ import path from 'node:path'
 import {
   app,
   BrowserWindow,
+  Menu,
   Notification,
+  Tray,
   desktopCapturer,
   ipcMain,
+  nativeImage,
   safeStorage,
   session,
   shell,
@@ -16,6 +19,16 @@ import {
   resolveRendererEntry,
   type DesktopMediaAutomationConfig,
 } from './config'
+import {
+  DESKTOP_CLIENT_COMMAND_CHANNEL,
+  DESKTOP_CLIENT_STATE_CHANNEL,
+  buildDesktopApplicationMenuTemplate,
+  buildDesktopTrayMenuTemplate,
+  createEmptyDesktopClientState,
+  parseDesktopClientState,
+  type DesktopClientCommand,
+  type DesktopClientState,
+} from './desktopNative'
 import {
   DEEP_LINK_ROUTE_CHANNEL,
   firstDesktopDeepLinkArg,
@@ -53,6 +66,9 @@ const deviceSessionSecrets = createDesktopDeviceSessionSecretStore({
 
 let mainWindow: BrowserWindow | null = null
 let pendingDeepLinkRoute: DesktopDeepLinkRoute | null = null
+let desktopClientState: DesktopClientState = createEmptyDesktopClientState()
+let tray: Tray | null = null
+let isQuitting = false
 
 applyDesktopMediaAutomationCommandLine(mediaAutomationConfig)
 captureDesktopDeepLink(firstDesktopDeepLinkArg(process.argv))
@@ -79,6 +95,17 @@ ipcMain.handle(MESSAGE_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
     })
   }
   notification.show()
+  return true
+})
+
+ipcMain.handle(DESKTOP_CLIENT_STATE_CHANNEL, (_event, payload: unknown) => {
+  const nextState = parseDesktopClientState(payload)
+  if (!nextState) {
+    return false
+  }
+
+  desktopClientState = nextState
+  refreshDesktopNativeShell()
   return true
 })
 
@@ -124,6 +151,7 @@ async function createWindow() {
   })
   window.webContents.once('did-finish-load', () => {
     flushPendingDeepLinkRoute(window)
+    refreshDesktopNativeShell()
     if (smokeMode) {
       console.log('opencord-desktop-ready')
       app.quit()
@@ -131,6 +159,25 @@ async function createWindow() {
   })
   window.once('ready-to-show', () => {
     window.show()
+    refreshDesktopNativeShell()
+  })
+  window.on('minimize', () => {
+    refreshDesktopNativeShell()
+  })
+  window.on('show', () => {
+    refreshDesktopNativeShell()
+  })
+  window.on('hide', () => {
+    refreshDesktopNativeShell()
+  })
+  window.on('close', (event) => {
+    if (isQuitting || smokeMode) {
+      return
+    }
+
+    event.preventDefault()
+    window.hide()
+    refreshDesktopNativeShell()
   })
   window.on('closed', () => {
     if (mainWindow === window) {
@@ -184,6 +231,7 @@ if (!singleInstanceLock) {
     app.setAsDefaultProtocolClient('opencord')
     configureDesktopMediaAutomation(mediaAutomationConfig)
     await createWindow()
+    configureDesktopNativeShell()
 
     app.on('activate', () => {
       if (mainWindow === null || mainWindow.isDestroyed()) {
@@ -192,6 +240,10 @@ if (!singleInstanceLock) {
     })
   })
 }
+
+app.on('before-quit', () => {
+  isQuitting = true
+})
 
 app.on('window-all-closed', () => {
   mainWindow = null
@@ -252,6 +304,97 @@ async function selectDesktopCaptureSource(config: DesktopMediaAutomationConfig) 
   }
 
   return sources.find((source) => source.id.startsWith('screen:')) ?? sources[0] ?? null
+}
+
+function configureDesktopNativeShell() {
+  refreshDesktopNativeShell()
+}
+
+function refreshDesktopNativeShell() {
+  if (!app.isReady()) {
+    return
+  }
+
+  refreshApplicationMenu()
+  refreshTrayMenu()
+}
+
+function refreshApplicationMenu() {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildDesktopApplicationMenuTemplate(desktopClientState, {
+        isDev: !app.isPackaged,
+        quit: quitOpenCord,
+        reload: () => mainWindow?.reload(),
+        sendCommand: sendDesktopClientCommand,
+        showWindow: showMainWindow,
+        toggleDevTools: () => mainWindow?.webContents.toggleDevTools(),
+      }),
+    ),
+  )
+}
+
+function refreshTrayMenu() {
+  if (!tray) {
+    tray = new Tray(openCordTrayIcon())
+    tray.setTitle('OC')
+    tray.on('click', () => {
+      if (mainWindow?.isVisible()) {
+        mainWindow.hide()
+      } else {
+        showMainWindow()
+      }
+      refreshDesktopNativeShell()
+    })
+  }
+
+  tray.setToolTip('OpenCord')
+  tray.setContextMenu(
+    Menu.buildFromTemplate(
+      buildDesktopTrayMenuTemplate(desktopClientState, {
+        hideWindow: () => {
+          mainWindow?.hide()
+          refreshDesktopNativeShell()
+        },
+        isWindowVisible: mainWindow?.isVisible() ?? false,
+        quit: quitOpenCord,
+        sendCommand: sendDesktopClientCommand,
+        showWindow: showMainWindow,
+      }),
+    ),
+  )
+}
+
+function openCordTrayIcon() {
+  const image = nativeImage.createFromDataURL(
+    'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHZpZXdCb3g9IjAgMCAxOCAxOCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHJ4PSI0IiBmaWxsPSIjMDBhOTg4Ii8+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjUiIGZpbGw9IiMxNTE1MTUiLz48Y2lyY2xlIGN4PSI5IiBjeT0iOSIgcj0iMyIgZmlsbD0iIzAwZjk5NSIvPjwvc3ZnPg==',
+  )
+  image.setTemplateImage(true)
+  return image
+}
+
+function showMainWindow() {
+  if (!mainWindow) {
+    void createWindow()
+    return
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+  refreshDesktopNativeShell()
+}
+
+function quitOpenCord() {
+  isQuitting = true
+  app.quit()
+}
+
+function sendDesktopClientCommand(command: DesktopClientCommand) {
+  showMainWindow()
+  mainWindow?.webContents.send(DESKTOP_CLIENT_COMMAND_CHANNEL, command)
 }
 
 function captureDesktopDeepLink(value: string | null) {

@@ -7,6 +7,14 @@ import {
   isDeviceSessionSecretKey,
 } from './deviceSessionSecretBridge'
 import {
+  DESKTOP_CLIENT_COMMAND_CHANNEL,
+  DESKTOP_CLIENT_STATE_CHANNEL,
+  isDesktopClientCommand,
+  parseDesktopClientState,
+  type DesktopClientCommand,
+  type DesktopClientState,
+} from './desktopNative'
+import {
   DEEP_LINK_ROUTE_CHANNEL,
   isDesktopDeepLinkRoute,
   type DesktopDeepLinkRoute,
@@ -36,6 +44,34 @@ contextBridge.exposeInMainWorld('openCordDesktop', {
       }
 
       return ipcRenderer.invoke(MESSAGE_NOTIFICATION_CHANNEL, payload) as Promise<boolean>
+    },
+  },
+  desktopState: {
+    update(payload: DesktopClientState) {
+      const state = parseDesktopClientState(payload)
+      if (!state) {
+        return Promise.resolve(false)
+      }
+
+      return ipcRenderer.invoke(DESKTOP_CLIENT_STATE_CHANNEL, state) as Promise<boolean>
+    },
+  },
+  desktopCommands: {
+    onCommand(handler: (command: DesktopClientCommand) => void) {
+      if (typeof handler !== 'function') {
+        return () => undefined
+      }
+
+      const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        if (isDesktopClientCommand(payload)) {
+          handler(payload)
+        }
+      }
+
+      ipcRenderer.on(DESKTOP_CLIENT_COMMAND_CHANNEL, listener)
+      return () => {
+        ipcRenderer.removeListener(DESKTOP_CLIENT_COMMAND_CHANNEL, listener)
+      }
     },
   },
   deviceSessions: {

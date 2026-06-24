@@ -1430,6 +1430,111 @@ button {
   background: rgba(10, 10, 10, 0.72);
 }
 
+.desktop-quick-switcher-backdrop {
+  z-index: 30;
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.desktop-quick-switcher {
+  width: min(560px, calc(100vw - 32px));
+  overflow: hidden;
+  color: #f4f4f5;
+  background: #202225;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.45);
+}
+
+.desktop-quick-switcher header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.desktop-quick-switcher h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.desktop-quick-switcher header button {
+  min-height: 34px;
+  padding: 0 10px;
+  color: #f4f4f5;
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  border-radius: 6px;
+}
+
+.desktop-quick-switcher input {
+  width: calc(100% - 32px);
+  margin: 16px;
+  padding: 12px;
+  color: #f4f4f5;
+  font-size: 16px;
+  background: #161719;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+}
+
+.desktop-quick-switcher-results {
+  display: grid;
+  gap: 4px;
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+  padding: 0 12px 12px;
+}
+
+.desktop-quick-switcher-results button {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  color: #d4d4d8;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.desktop-quick-switcher-results button:hover,
+.desktop-quick-switcher-results button[aria-current='true'] {
+  color: #ffffff;
+  background: rgba(0, 169, 136, 0.16);
+}
+
+.desktop-quick-switcher-results span {
+  color: #8a8d93;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.desktop-quick-switcher-results strong,
+.desktop-quick-switcher-results em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-quick-switcher-results em {
+  color: #9ca3af;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.desktop-quick-switcher-results p {
+  margin: 0;
+  padding: 18px 10px 22px;
+  color: #a1a1aa;
+}
+
 .meeting-dialog {
   width: min(480px, 100%);
   border: 1px solid #3c3c3c;

@@ -12,6 +12,16 @@ const mediaMocks = vi.hoisted(() => ({
   lastVoiceSession: null as ReturnType<typeof createMockVoiceSession> | null,
 }))
 
+type DesktopCommandForTest =
+  | { kind: 'select-server'; serverId: string }
+  | { kind: 'select-channel'; channelId: string }
+  | { kind: 'show-channel-search' }
+  | { kind: 'show-settings'; panel: string }
+  | { kind: 'voice-toggle-mute' }
+  | { kind: 'voice-toggle-deafen' }
+  | { kind: 'voice-leave' }
+  | { kind: 'screen-share-toggle' }
+
 vi.mock('@opencord/media', () => ({
   connectLiveKitVoice: mediaMocks.connectLiveKitVoice,
 }))
@@ -156,6 +166,118 @@ describe('OpenCord web chat UI', () => {
         name: 'Notification settings',
       }),
     ).toBeInTheDocument()
+  })
+
+  it('publishes non-secret desktop state for native Electron menus and tray', async () => {
+    const desktopStateUpdates: unknown[] = []
+    const updateDesktopState = vi.fn(async (payload: unknown) => {
+      desktopStateUpdates.push(payload)
+      return true
+    })
+    vi.stubGlobal('openCordDesktop', {
+      desktopCommands: {
+        onCommand() {
+          return () => undefined
+        },
+      },
+      desktopState: {
+        update: updateDesktopState,
+      },
+      platform: 'darwin',
+    })
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: '# general' })
+    await waitFor(() => {
+      expect(updateDesktopState).toHaveBeenCalled()
+    })
+
+    const latestState = desktopStateUpdates.at(-1) as {
+      activeChannel: { id: string; name: string }
+      activeServer: { name: string; url: string }
+      servers: Array<{ active: boolean; name: string }>
+      voice: { channelName: string; connected: boolean; muted: boolean }
+    }
+    expect(latestState.activeServer).toMatchObject({
+      name: 'Local OpenCord',
+      url: 'http://localhost:8080',
+    })
+    expect(latestState.activeChannel).toMatchObject({ id: 'general', name: 'general' })
+    expect(latestState.servers).toContainEqual(
+      expect.objectContaining({ active: true, name: 'Local OpenCord' }),
+    )
+    expect(latestState.voice).toMatchObject({
+      channelName: 'Standup',
+      connected: true,
+      muted: false,
+    })
+    expect(JSON.stringify(latestState)).not.toContain('session')
+    expect(JSON.stringify(latestState)).not.toContain('token')
+  })
+
+  it('handles native Electron menu commands for search, settings, and voice controls', async () => {
+    let commandHandler: ((command: DesktopCommandForTest) => void) | null = null
+    vi.stubGlobal('openCordDesktop', {
+      desktopCommands: {
+        onCommand(handler: (command: DesktopCommandForTest) => void) {
+          commandHandler = handler
+          return () => {
+            commandHandler = null
+          }
+        },
+      },
+      desktopState: {
+        update: vi.fn(async () => true),
+      },
+      platform: 'darwin',
+    })
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: '# general' })
+    expect(commandHandler).not.toBeNull()
+
+    act(() => {
+      commandHandler?.({ kind: 'show-channel-search' })
+    })
+    const quickSearch = await screen.findByRole('dialog', { name: 'Quick channel search' })
+    await userEvent.type(within(quickSearch).getByRole('textbox', { name: 'Search channels' }), 'ann')
+    await userEvent.click(within(quickSearch).getByRole('button', { name: /announcements/i }))
+    expect(await screen.findByRole('heading', { name: '# announcements' })).toBeInTheDocument()
+
+    act(() => {
+      commandHandler?.({ kind: 'show-settings', panel: 'notifications' })
+    })
+    expect(await screen.findByRole('region', { name: 'Notification settings' })).toBeInTheDocument()
+
+    act(() => {
+      commandHandler?.({ kind: 'voice-toggle-mute' })
+    })
+    expect(screen.getByRole('button', { name: 'Unmute microphone' })).toBeInTheDocument()
+
+    act(() => {
+      commandHandler?.({ kind: 'voice-toggle-deafen' })
+    })
+    expect(screen.getByRole('button', { name: 'Undeafen audio' })).toBeInTheDocument()
+
+    act(() => {
+      commandHandler?.({ kind: 'voice-leave' })
+    })
+    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Not connected')
+  })
+
+  it('opens quick channel search from the desktop keyboard shortcut', async () => {
+    render(<App />)
+
+    await screen.findByRole('heading', { name: '# general' })
+    fireEvent.keyDown(window, { ctrlKey: true, key: 'k' })
+
+    const quickSearch = await screen.findByRole('dialog', { name: 'Quick channel search' })
+    await userEvent.type(within(quickSearch).getByRole('textbox', { name: 'Search channels' }), 'back')
+    await userEvent.click(within(quickSearch).getByRole('button', { name: /backend/i }))
+
+    expect(await screen.findByRole('heading', { name: '# backend' })).toBeInTheDocument()
   })
 
   it('bootstraps a local alpha workspace and sends messages through real API calls', async () => {

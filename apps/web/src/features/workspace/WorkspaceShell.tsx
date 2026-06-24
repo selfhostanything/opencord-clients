@@ -230,6 +230,12 @@ type MeetingRoomState = {
 }
 
 type OpenCordDesktopRuntime = {
+  desktopCommands?: {
+    onCommand(handler: (command: OpenCordDesktopCommand) => void): () => void
+  }
+  desktopState?: {
+    update(payload: OpenCordDesktopClientState): Promise<boolean>
+  }
   deviceSessions?: {
     getSecret(key: string): Promise<string | null>
     removeSecret(key: string): Promise<boolean>
@@ -254,6 +260,49 @@ type OpenCordDesktopRuntime = {
     node?: string
   }
 }
+
+type OpenCordDesktopServerState = {
+  active: boolean
+  id: string
+  name: string
+  url: string
+}
+
+type OpenCordDesktopChannelState = {
+  id: string
+  kind: 'text' | 'voice'
+  name: string
+  spaceId: string
+}
+
+type OpenCordDesktopClientState = {
+  activeChannel: OpenCordDesktopChannelState | null
+  activeServer: OpenCordDesktopServerState
+  activeSpace: {
+    id: string
+    name: string
+  } | null
+  channels: OpenCordDesktopChannelState[]
+  servers: OpenCordDesktopServerState[]
+  voice: {
+    channelId: string | null
+    channelName: string | null
+    connected: boolean
+    deafened: boolean
+    muted: boolean
+    screenSharing: boolean
+  }
+}
+
+type OpenCordDesktopCommand =
+  | { kind: 'select-server'; serverId: string }
+  | { kind: 'select-channel'; channelId: string }
+  | { kind: 'show-channel-search' }
+  | { kind: 'show-settings'; panel: OpenCordSettingsPanel }
+  | { kind: 'voice-toggle-mute' }
+  | { kind: 'voice-toggle-deafen' }
+  | { kind: 'voice-leave' }
+  | { kind: 'screen-share-toggle' }
 
 declare global {
   interface Window {
@@ -514,6 +563,8 @@ export function WorkspaceShell({
   const [pendingAttachments, setPendingAttachments] = useState<MessageAttachment[]>([])
   const [showChannelForm, setShowChannelForm] = useState(false)
   const [showUserSettings, setShowUserSettings] = useState(false)
+  const [desktopQuickSwitcherOpen, setDesktopQuickSwitcherOpen] = useState(false)
+  const [desktopQuickSwitcherQuery, setDesktopQuickSwitcherQuery] = useState('')
   const [activeUserSettingsPanel, setActiveUserSettingsPanel] =
     useState<OpenCordSettingsPanel>(initialSettingsPanel ?? 'voice-video')
   const [newChannelName, setNewChannelName] = useState('')
@@ -564,6 +615,9 @@ export function WorkspaceShell({
   const localAlphaUserRef = useRef<AuthUser | null>(null)
   const voiceStateRef = useRef(voiceState)
   const meetingRoomRef = useRef(meetingRoom)
+  const desktopCommandHandlerRef = useRef<(command: OpenCordDesktopCommand) => void>(
+    () => undefined,
+  )
   const remoteAudioContainerRef = useRef<HTMLDivElement | null>(null)
   const remoteScreenShareContainerRef = useRef<HTMLElement | null>(null)
   const meetingRemoteAudioContainerRef = useRef<HTMLDivElement | null>(null)
@@ -576,6 +630,69 @@ export function WorkspaceShell({
   const channelMessages = messages.filter((message) => message.channelId === selectedChannel.id)
   const groupedMembers = useMemo(() => groupMembersByRole(members), [])
   const desktopRuntime = getOpenCordDesktopRuntime()
+  const desktopVoiceChannel =
+    voiceState.connectedChannelId ?
+      channels.find((channel) => channel.id === voiceState.connectedChannelId) :
+      undefined
+  const desktopClientState = useMemo<OpenCordDesktopClientState>(() => {
+    const activeServer = {
+      active: true,
+      id: activeConnection.id,
+      name: activeConnection.displayName,
+      url: activeConnection.baseUrl,
+    }
+
+    return {
+      activeChannel: selectedChannel
+        ? {
+            id: selectedChannel.id,
+            kind: selectedChannel.kind,
+            name: selectedChannel.name,
+            spaceId: selectedChannel.spaceId,
+          }
+        : null,
+      activeServer,
+      activeSpace: selectedSpace
+        ? {
+            id: selectedSpace.id,
+            name: selectedSpace.name,
+          }
+        : null,
+      channels: channels.map((channel) => ({
+        id: channel.id,
+        kind: channel.kind,
+        name: channel.name,
+        spaceId: channel.spaceId,
+      })),
+      servers: serverConnections.connections.map((connection) => ({
+        active: connection.id === activeConnection.id,
+        id: connection.id,
+        name: connection.displayName,
+        url: connection.baseUrl,
+      })),
+      voice: {
+        channelId: voiceState.connectedChannelId,
+        channelName: desktopVoiceChannel ? displayChannelName(desktopVoiceChannel.name) : null,
+        connected: Boolean(desktopVoiceChannel),
+        deafened: voiceState.selfDeaf,
+        muted: voiceState.selfMute,
+        screenSharing: screenShareState.status === 'sharing',
+      },
+    }
+  }, [
+    activeConnection.baseUrl,
+    activeConnection.displayName,
+    activeConnection.id,
+    channels,
+    desktopVoiceChannel,
+    screenShareState.status,
+    selectedChannel,
+    selectedSpace,
+    serverConnections.connections,
+    voiceState.connectedChannelId,
+    voiceState.selfDeaf,
+    voiceState.selfMute,
+  ])
   const realtimeURL = useMemo(
     () => safeRealtimeURL(activeConnection.baseUrl),
     [activeConnection.baseUrl],
@@ -955,6 +1072,66 @@ export function WorkspaceShell({
     }
   }, [])
 
+  desktopCommandHandlerRef.current = handleDesktopCommand
+
+  useEffect(() => {
+    void desktopRuntime?.desktopState?.update(desktopClientState)
+  }, [desktopClientState, desktopRuntime])
+
+  useEffect(() => {
+    const unsubscribe = desktopRuntime?.desktopCommands?.onCommand((command) => {
+      desktopCommandHandlerRef.current(command)
+    })
+
+    return () => {
+      unsubscribe?.()
+    }
+  }, [desktopRuntime])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const commandModifier = event.metaKey || event.ctrlKey
+      if (!commandModifier) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+      if (key === 'k' && !event.shiftKey) {
+        event.preventDefault()
+        desktopCommandHandlerRef.current({ kind: 'show-channel-search' })
+        return
+      }
+
+      if (!event.shiftKey) {
+        return
+      }
+
+      switch (key) {
+        case 'm':
+          event.preventDefault()
+          desktopCommandHandlerRef.current({ kind: 'voice-toggle-mute' })
+          return
+        case 'd':
+          event.preventDefault()
+          desktopCommandHandlerRef.current({ kind: 'voice-toggle-deafen' })
+          return
+        case 'l':
+          event.preventDefault()
+          desktopCommandHandlerRef.current({ kind: 'voice-leave' })
+          return
+        case 's':
+          event.preventDefault()
+          desktopCommandHandlerRef.current({ kind: 'screen-share-toggle' })
+          return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
+
   async function submitServer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const targetURL = serverURL
@@ -1001,6 +1178,27 @@ export function WorkspaceShell({
     setSelectedChannelId(channelId)
     setMeetingRoom(null)
     setActivePanel('chat')
+  }
+
+  function selectChannelFromDesktopCommand(channelId: string) {
+    const channel = channels.find((candidate) => candidate.id === channelId)
+    if (!channel) {
+      return
+    }
+
+    setSelectedSpaceId(channel.spaceId)
+    if (channel.kind === 'voice') {
+      void joinVoiceChannel(channel.id)
+      return
+    }
+
+    selectTextChannel(channel.id)
+  }
+
+  function selectChannelFromDesktopQuickSwitcher(channel: Channel) {
+    setDesktopQuickSwitcherOpen(false)
+    setDesktopQuickSwitcherQuery('')
+    selectChannelFromDesktopCommand(channel.id)
   }
 
   function showChatPanel() {
@@ -2099,6 +2297,53 @@ export function WorkspaceShell({
     })
   }
 
+  function handleDesktopCommand(command: OpenCordDesktopCommand) {
+    switch (command.kind) {
+      case 'select-server': {
+        const connection = serverConnections.connections.find(
+          (candidate) => candidate.id === command.serverId,
+        )
+        if (connection) {
+          selectServerConnection(connection)
+        }
+        return
+      }
+      case 'select-channel':
+        selectChannelFromDesktopCommand(command.channelId)
+        return
+      case 'show-channel-search':
+        setDesktopQuickSwitcherQuery('')
+        setDesktopQuickSwitcherOpen(true)
+        return
+      case 'show-settings':
+        setActiveUserSettingsPanel(command.panel)
+        setShowUserSettings(true)
+        return
+      case 'voice-toggle-mute':
+        if (voiceState.connectedChannelId) {
+          toggleSelfMute()
+        }
+        return
+      case 'voice-toggle-deafen':
+        if (voiceState.connectedChannelId) {
+          toggleSelfDeaf()
+        }
+        return
+      case 'voice-leave':
+        if (voiceState.connectedChannelId) {
+          disconnectVoice()
+        }
+        return
+      case 'screen-share-toggle':
+        if (screenShareState.status === 'sharing') {
+          stopScreenShare()
+        } else {
+          void startScreenShare()
+        }
+        return
+    }
+  }
+
   return (
     <WorkspaceLayout routePanel={routeContext.panel}>
       <aside className="space-rail" aria-label="Space rail">
@@ -2558,7 +2803,101 @@ export function WorkspaceShell({
           </section>
         ))}
       </aside>
+
+      {desktopQuickSwitcherOpen ? (
+        <DesktopQuickSwitcher
+          channels={channels}
+          query={desktopQuickSwitcherQuery}
+          selectedChannelId={selectedChannel.id}
+          onClose={() => setDesktopQuickSwitcherOpen(false)}
+          onQueryChange={setDesktopQuickSwitcherQuery}
+          onSelectChannel={selectChannelFromDesktopQuickSwitcher}
+        />
+      ) : null}
     </WorkspaceLayout>
+  )
+}
+
+function DesktopQuickSwitcher({
+  channels,
+  query,
+  selectedChannelId,
+  onClose,
+  onQueryChange,
+  onSelectChannel,
+}: {
+  channels: Channel[]
+  query: string
+  selectedChannelId: string
+  onClose: () => void
+  onQueryChange: (value: string) => void
+  onSelectChannel: (channel: Channel) => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredChannels = useMemo(
+    () =>
+      channels
+        .filter((channel) =>
+          normalizedQuery
+            ? `${channel.name} ${channel.category}`.toLowerCase().includes(normalizedQuery)
+            : true,
+        )
+        .slice(0, 12),
+    [channels, normalizedQuery],
+  )
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  return (
+    <div className="modal-backdrop desktop-quick-switcher-backdrop" onClick={onClose}>
+      <section
+        aria-label="Quick channel search"
+        aria-modal="true"
+        className="desktop-quick-switcher"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <h2>Quick channel search</h2>
+          <button type="button" aria-label="Close quick channel search" onClick={onClose}>
+            Close
+          </button>
+        </header>
+        <input
+          ref={inputRef}
+          aria-label="Search channels"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              onClose()
+            }
+          }}
+          placeholder="Search channels"
+        />
+        <div className="desktop-quick-switcher-results" aria-label="Channel search results">
+          {filteredChannels.length === 0 ? (
+            <p>No matching channels</p>
+          ) : (
+            filteredChannels.map((channel) => (
+              <button
+                key={channel.id}
+                aria-current={channel.id === selectedChannelId ? 'true' : undefined}
+                type="button"
+                onClick={() => onSelectChannel(channel)}
+              >
+                <span aria-hidden="true">{channel.kind === 'text' ? '#' : 'Voice'}</span>
+                <strong>{channel.name}</strong>
+                <em>{channel.category}</em>
+              </button>
+            ))
+          )}
+        </div>
+      </section>
+    </div>
   )
 }
 
