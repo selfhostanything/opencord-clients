@@ -11,6 +11,7 @@ import {
   safeStorage,
   session,
   shell,
+  type DesktopCapturerSource,
 } from 'electron'
 
 import {
@@ -22,12 +23,17 @@ import {
 import {
   DESKTOP_CLIENT_COMMAND_CHANNEL,
   DESKTOP_CLIENT_STATE_CHANNEL,
+  DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL,
+  DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL,
   buildDesktopApplicationMenuTemplate,
   buildDesktopTrayMenuTemplate,
   createEmptyDesktopClientState,
+  parseDesktopCapturePickerResponse,
   parseDesktopClientState,
   type DesktopClientCommand,
   type DesktopClientState,
+  type DesktopCapturePickerRequest,
+  type DesktopCaptureSource,
 } from './desktopNative'
 import {
   DEEP_LINK_ROUTE_CHANNEL,
@@ -69,6 +75,14 @@ let pendingDeepLinkRoute: DesktopDeepLinkRoute | null = null
 let desktopClientState: DesktopClientState = createEmptyDesktopClientState()
 let tray: Tray | null = null
 let isQuitting = false
+let desktopCapturePickerSequence = 0
+const pendingDesktopCapturePickers = new Map<
+  string,
+  {
+    resolve: (sourceId: string | null) => void
+    timeout: NodeJS.Timeout
+  }
+>()
 
 applyDesktopMediaAutomationCommandLine(mediaAutomationConfig)
 captureDesktopDeepLink(firstDesktopDeepLinkArg(process.argv))
@@ -106,6 +120,23 @@ ipcMain.handle(DESKTOP_CLIENT_STATE_CHANNEL, (_event, payload: unknown) => {
 
   desktopClientState = nextState
   refreshDesktopNativeShell()
+  return true
+})
+
+ipcMain.handle(DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL, (_event, payload: unknown) => {
+  const response = parseDesktopCapturePickerResponse(payload)
+  if (!response) {
+    return false
+  }
+
+  const pending = pendingDesktopCapturePickers.get(response.requestId)
+  if (!pending) {
+    return false
+  }
+
+  clearTimeout(pending.timeout)
+  pendingDesktopCapturePickers.delete(response.requestId)
+  pending.resolve(response.sourceId)
   return true
 })
 
@@ -229,7 +260,7 @@ if (!singleInstanceLock) {
 
   app.whenReady().then(async () => {
     app.setAsDefaultProtocolClient('opencord')
-    configureDesktopMediaAutomation(mediaAutomationConfig)
+    configureDesktopDisplayMedia(mediaAutomationConfig)
     await createWindow()
     configureDesktopNativeShell()
 
@@ -266,17 +297,17 @@ function applyDesktopMediaAutomationCommandLine(config: DesktopMediaAutomationCo
   }
 }
 
-function configureDesktopMediaAutomation(config: DesktopMediaAutomationConfig) {
-  if (!config.enabled) {
-    return
+function configureDesktopDisplayMedia(config: DesktopMediaAutomationConfig) {
+  if (config.enabled) {
+    session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      callback(permission === 'media')
+    })
+    session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
+      permission === 'media',
+    )
+    console.log('opencord-desktop-media-e2e-ready')
   }
 
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(permission === 'media')
-  })
-  session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
-    permission === 'media',
-  )
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
     void selectDesktopCaptureSource(config).then((source) => {
       if (!source) {
@@ -284,15 +315,20 @@ function configureDesktopMediaAutomation(config: DesktopMediaAutomationConfig) {
         return
       }
 
-      console.log(`opencord-desktop-e2e-display-source:${source.id}:${source.name}`)
+      if (config.enabled) {
+        console.log(`opencord-desktop-e2e-display-source:${source.id}:${source.name}`)
+      }
       callback({ video: source })
     })
   }, { useSystemPicker: false })
-  console.log('opencord-desktop-media-e2e-ready')
 }
 
 async function selectDesktopCaptureSource(config: DesktopMediaAutomationConfig) {
   const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
+  if (!config.enabled) {
+    return selectDesktopCaptureSourceWithPicker(sources)
+  }
+
   const preferredSourceName = config.preferredSourceName?.toLowerCase()
   if (preferredSourceName) {
     const preferredSource = sources.find((source) =>
@@ -304,6 +340,56 @@ async function selectDesktopCaptureSource(config: DesktopMediaAutomationConfig) 
   }
 
   return sources.find((source) => source.id.startsWith('screen:')) ?? sources[0] ?? null
+}
+
+async function selectDesktopCaptureSourceWithPicker(sources: DesktopCapturerSource[]) {
+  if (!mainWindow || mainWindow.isDestroyed() || sources.length === 0) {
+    return null
+  }
+
+  showMainWindow()
+  const request = desktopCapturePickerRequestFromSources(sources)
+  mainWindow.webContents.send(DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL, request)
+  const selectedSourceId = await waitForDesktopCapturePickerResponse(request.requestId)
+  if (!selectedSourceId) {
+    return null
+  }
+
+  return sources.find((source) => source.id === selectedSourceId) ?? null
+}
+
+function desktopCapturePickerRequestFromSources(
+  sources: DesktopCapturerSource[],
+): DesktopCapturePickerRequest {
+  desktopCapturePickerSequence += 1
+  return {
+    requestId: `desktop-capture-${Date.now()}-${desktopCapturePickerSequence}`,
+    sources: sources.slice(0, 80).map(desktopCaptureSourceForRenderer),
+  }
+}
+
+function desktopCaptureSourceForRenderer(source: DesktopCapturerSource): DesktopCaptureSource {
+  const thumbnail = source.thumbnail.isEmpty()
+    ? null
+    : source.thumbnail.resize({ width: 320 }).toDataURL()
+
+  return {
+    id: source.id,
+    kind: source.id.startsWith('screen:') ? 'screen' : 'window',
+    name: source.name,
+    thumbnailDataUrl: thumbnail,
+  }
+}
+
+function waitForDesktopCapturePickerResponse(requestId: string) {
+  return new Promise<string | null>((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingDesktopCapturePickers.delete(requestId)
+      resolve(null)
+    }, 60_000)
+
+    pendingDesktopCapturePickers.set(requestId, { resolve, timeout })
+  })
 }
 
 function configureDesktopNativeShell() {

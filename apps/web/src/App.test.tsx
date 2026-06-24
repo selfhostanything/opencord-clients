@@ -280,6 +280,122 @@ describe('OpenCord web chat UI', () => {
     expect(await screen.findByRole('heading', { name: '# backend' })).toBeInTheDocument()
   })
 
+  it('renders the Electron screen-share picker and returns the selected source', async () => {
+    let pickerHandler:
+      | ((request: {
+          requestId: string
+          sources: Array<{
+            id: string
+            kind: 'screen' | 'window'
+            name: string
+            thumbnailDataUrl: string | null
+          }>
+        }) => void)
+      | null = null
+    const respond = vi.fn(async () => true)
+    vi.stubGlobal('openCordDesktop', {
+      platform: 'darwin',
+      screenShare: {
+        onPickerRequest(handler: typeof pickerHandler) {
+          pickerHandler = handler
+          return () => {
+            pickerHandler = null
+          }
+        },
+        respond,
+      },
+    })
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: '# general' })
+    act(() => {
+      pickerHandler?.({
+        requestId: 'capture-request-1',
+        sources: [
+          {
+            id: 'screen:0:0',
+            kind: 'screen',
+            name: 'Entire Screen',
+            thumbnailDataUrl: 'data:image/png;base64,abcd',
+          },
+          {
+            id: 'window:42:0',
+            kind: 'window',
+            name: 'OpenCord',
+            thumbnailDataUrl: null,
+          },
+        ],
+      })
+    })
+
+    const picker = await screen.findByRole('dialog', { name: 'Choose what to share' })
+    expect(within(picker).getByRole('heading', { name: 'Share screen' })).toBeInTheDocument()
+    expect(within(picker).getByRole('region', { name: 'Screens' })).toHaveTextContent('Entire Screen')
+    expect(within(picker).getByRole('region', { name: 'Windows' })).toHaveTextContent('OpenCord')
+
+    await userEvent.click(within(picker).getByRole('button', { name: 'Share Entire Screen' }))
+
+    await waitFor(() => {
+      expect(respond).toHaveBeenCalledWith({
+        requestId: 'capture-request-1',
+        sourceId: 'screen:0:0',
+      })
+    })
+    expect(screen.queryByRole('dialog', { name: 'Choose what to share' })).not.toBeInTheDocument()
+  })
+
+  it('cancels the Electron screen-share picker without selecting a source', async () => {
+    let pickerHandler:
+      | ((request: {
+          requestId: string
+          sources: Array<{
+            id: string
+            kind: 'screen' | 'window'
+            name: string
+            thumbnailDataUrl: string | null
+          }>
+        }) => void)
+      | null = null
+    const respond = vi.fn(async () => true)
+    vi.stubGlobal('openCordDesktop', {
+      platform: 'darwin',
+      screenShare: {
+        onPickerRequest(handler: typeof pickerHandler) {
+          pickerHandler = handler
+          return () => {
+            pickerHandler = null
+          }
+        },
+        respond,
+      },
+    })
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: '# general' })
+    act(() => {
+      pickerHandler?.({
+        requestId: 'capture-request-2',
+        sources: [],
+      })
+    })
+
+    const picker = await screen.findByRole('dialog', { name: 'Choose what to share' })
+    expect(within(picker).getByText('No screens available')).toBeInTheDocument()
+    expect(within(picker).getByText('No windows available')).toBeInTheDocument()
+
+    await userEvent.click(within(picker).getByRole('button', { name: 'Cancel screen share' }))
+
+    await waitFor(() => {
+      expect(respond).toHaveBeenCalledWith({
+        requestId: 'capture-request-2',
+        sourceId: null,
+      })
+    })
+    expect(screen.queryByRole('dialog', { name: 'Choose what to share' })).not.toBeInTheDocument()
+  })
+
   it('bootstraps a local alpha workspace and sends messages through real API calls', async () => {
     const channelId = '01973f83-f22a-73ba-ae76-5a045c52fc93'
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

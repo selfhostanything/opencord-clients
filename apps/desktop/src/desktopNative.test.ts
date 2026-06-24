@@ -4,11 +4,15 @@ import type { MenuItemConstructorOptions } from 'electron'
 import {
   DESKTOP_CLIENT_COMMAND_CHANNEL,
   DESKTOP_CLIENT_STATE_CHANNEL,
+  DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL,
+  DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL,
   buildDesktopApplicationMenuTemplate,
   buildDesktopTrayMenuTemplate,
   createEmptyDesktopClientState,
   desktopVoiceStatusLabel,
   isDesktopClientCommand,
+  parseDesktopCapturePickerRequest,
+  parseDesktopCapturePickerResponse,
   parseDesktopClientCommand,
   parseDesktopClientState,
   type DesktopClientCommand,
@@ -18,6 +22,12 @@ describe('desktop native shell bridge', () => {
   it('uses dedicated IPC channels for desktop state and commands', () => {
     expect(DESKTOP_CLIENT_STATE_CHANNEL).toBe('opencord:desktop:client-state')
     expect(DESKTOP_CLIENT_COMMAND_CHANNEL).toBe('opencord:desktop:command')
+    expect(DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL).toBe(
+      'opencord:desktop-capture:picker-request',
+    )
+    expect(DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL).toBe(
+      'opencord:desktop-capture:picker-response',
+    )
   })
 
   it('validates and normalizes non-secret renderer desktop state', () => {
@@ -42,6 +52,64 @@ describe('desktop native shell bridge', () => {
     expect(isDesktopClientCommand({ kind: 'voice-toggle-mute' })).toBe(true)
     expect(isDesktopClientCommand({ kind: 'show-settings', panel: 'secrets' })).toBe(false)
     expect(isDesktopClientCommand({ kind: 'select-server', serverId: '' })).toBe(false)
+  })
+
+  it('validates desktop capture picker requests and responses', () => {
+    expect(
+      parseDesktopCapturePickerRequest({
+        requestId: 'capture-1',
+        sources: [
+          {
+            id: 'screen:0:0',
+            kind: 'screen',
+            name: 'Entire Screen',
+            thumbnailDataUrl: 'data:image/png;base64,abcd',
+          },
+          {
+            id: 'window:123:0',
+            kind: 'window',
+            name: 'OpenCord',
+            thumbnailDataUrl: null,
+          },
+        ],
+      }),
+    ).toEqual({
+      requestId: 'capture-1',
+      sources: [
+        {
+          id: 'screen:0:0',
+          kind: 'screen',
+          name: 'Entire Screen',
+          thumbnailDataUrl: 'data:image/png;base64,abcd',
+        },
+        {
+          id: 'window:123:0',
+          kind: 'window',
+          name: 'OpenCord',
+          thumbnailDataUrl: null,
+        },
+      ],
+    })
+    expect(
+      parseDesktopCapturePickerRequest({
+        requestId: 'capture-1',
+        sources: [{ id: 'screen:0:0', kind: 'camera', name: 'Camera', thumbnailDataUrl: null }],
+      }),
+    ).toBeNull()
+    expect(
+      parseDesktopCapturePickerRequest({
+        requestId: 'capture-1',
+        sources: [{ id: 'screen:0:0', kind: 'screen', name: 'Screen', thumbnailDataUrl: 'http://x' }],
+      }),
+    ).toBeNull()
+
+    expect(
+      parseDesktopCapturePickerResponse({ requestId: 'capture-1', sourceId: 'screen:0:0' }),
+    ).toEqual({ requestId: 'capture-1', sourceId: 'screen:0:0' })
+    expect(parseDesktopCapturePickerResponse({ requestId: 'capture-1', sourceId: null }))
+      .toEqual({ requestId: 'capture-1', sourceId: null })
+    expect(parseDesktopCapturePickerResponse({ requestId: '', sourceId: 'screen:0:0' }))
+      .toBeNull()
   })
 
   it('builds a tray menu that mirrors server, channel, and voice state', () => {

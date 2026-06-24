@@ -236,6 +236,12 @@ type OpenCordDesktopRuntime = {
   desktopState?: {
     update(payload: OpenCordDesktopClientState): Promise<boolean>
   }
+  screenShare?: {
+    onPickerRequest(
+      handler: (request: OpenCordDesktopCapturePickerRequest) => void,
+    ): () => void
+    respond(response: OpenCordDesktopCapturePickerResponse): Promise<boolean>
+  }
   deviceSessions?: {
     getSecret(key: string): Promise<string | null>
     removeSecret(key: string): Promise<boolean>
@@ -303,6 +309,23 @@ type OpenCordDesktopCommand =
   | { kind: 'voice-toggle-deafen' }
   | { kind: 'voice-leave' }
   | { kind: 'screen-share-toggle' }
+
+type OpenCordDesktopCaptureSource = {
+  id: string
+  kind: 'screen' | 'window'
+  name: string
+  thumbnailDataUrl: string | null
+}
+
+type OpenCordDesktopCapturePickerRequest = {
+  requestId: string
+  sources: OpenCordDesktopCaptureSource[]
+}
+
+type OpenCordDesktopCapturePickerResponse = {
+  requestId: string
+  sourceId: string | null
+}
 
 declare global {
   interface Window {
@@ -565,6 +588,8 @@ export function WorkspaceShell({
   const [showUserSettings, setShowUserSettings] = useState(false)
   const [desktopQuickSwitcherOpen, setDesktopQuickSwitcherOpen] = useState(false)
   const [desktopQuickSwitcherQuery, setDesktopQuickSwitcherQuery] = useState('')
+  const [desktopCaptureRequest, setDesktopCaptureRequest] =
+    useState<OpenCordDesktopCapturePickerRequest | null>(null)
   const [activeUserSettingsPanel, setActiveUserSettingsPanel] =
     useState<OpenCordSettingsPanel>(initialSettingsPanel ?? 'voice-video')
   const [newChannelName, setNewChannelName] = useState('')
@@ -1081,6 +1106,16 @@ export function WorkspaceShell({
   useEffect(() => {
     const unsubscribe = desktopRuntime?.desktopCommands?.onCommand((command) => {
       desktopCommandHandlerRef.current(command)
+    })
+
+    return () => {
+      unsubscribe?.()
+    }
+  }, [desktopRuntime])
+
+  useEffect(() => {
+    const unsubscribe = desktopRuntime?.screenShare?.onPickerRequest((request) => {
+      setDesktopCaptureRequest(request)
     })
 
     return () => {
@@ -2344,6 +2379,22 @@ export function WorkspaceShell({
     }
   }
 
+  async function respondToDesktopCapturePicker(sourceId: string | null) {
+    if (!desktopCaptureRequest) {
+      return
+    }
+
+    const requestId = desktopCaptureRequest.requestId
+    setDesktopCaptureRequest(null)
+    const accepted = await desktopRuntime?.screenShare?.respond({ requestId, sourceId })
+    if (accepted === false) {
+      setScreenShareState({
+        status: 'error',
+        message: 'Screen share source expired. Try sharing again.',
+      })
+    }
+  }
+
   return (
     <WorkspaceLayout routePanel={routeContext.panel}>
       <aside className="space-rail" aria-label="Space rail">
@@ -2814,7 +2865,102 @@ export function WorkspaceShell({
           onSelectChannel={selectChannelFromDesktopQuickSwitcher}
         />
       ) : null}
+      {desktopCaptureRequest ? (
+        <DesktopScreenSharePicker
+          request={desktopCaptureRequest}
+          onCancel={() => void respondToDesktopCapturePicker(null)}
+          onSelectSource={(sourceId) => void respondToDesktopCapturePicker(sourceId)}
+        />
+      ) : null}
     </WorkspaceLayout>
+  )
+}
+
+function DesktopScreenSharePicker({
+  request,
+  onCancel,
+  onSelectSource,
+}: {
+  request: OpenCordDesktopCapturePickerRequest
+  onCancel: () => void
+  onSelectSource: (sourceId: string) => void
+}) {
+  const screenSources = request.sources.filter((source) => source.kind === 'screen')
+  const windowSources = request.sources.filter((source) => source.kind === 'window')
+
+  return (
+    <div className="modal-backdrop desktop-capture-picker-backdrop">
+      <section
+        aria-label="Choose what to share"
+        aria-modal="true"
+        className="desktop-capture-picker"
+        role="dialog"
+      >
+        <header>
+          <div>
+            <h2>Share screen</h2>
+            <p>Choose one screen or window to publish to the current call.</p>
+          </div>
+          <button type="button" aria-label="Cancel screen share" onClick={onCancel}>
+            Cancel
+          </button>
+        </header>
+        <DesktopCaptureSourceGroup
+          emptyLabel="No screens available"
+          label="Screens"
+          sources={screenSources}
+          onSelectSource={onSelectSource}
+        />
+        <DesktopCaptureSourceGroup
+          emptyLabel="No windows available"
+          label="Windows"
+          sources={windowSources}
+          onSelectSource={onSelectSource}
+        />
+      </section>
+    </div>
+  )
+}
+
+function DesktopCaptureSourceGroup({
+  emptyLabel,
+  label,
+  sources,
+  onSelectSource,
+}: {
+  emptyLabel: string
+  label: string
+  sources: OpenCordDesktopCaptureSource[]
+  onSelectSource: (sourceId: string) => void
+}) {
+  return (
+    <section className="desktop-capture-source-group" aria-label={label}>
+      <h3>{label}</h3>
+      {sources.length === 0 ? (
+        <p>{emptyLabel}</p>
+      ) : (
+        <div className="desktop-capture-source-grid">
+          {sources.map((source) => (
+            <button
+              key={source.id}
+              type="button"
+              aria-label={`Share ${source.name}`}
+              onClick={() => onSelectSource(source.id)}
+            >
+              <span className="desktop-capture-thumbnail">
+                {source.thumbnailDataUrl ? (
+                  <img src={source.thumbnailDataUrl} alt="" />
+                ) : (
+                  <span aria-hidden="true">{source.kind === 'screen' ? 'Screen' : 'Window'}</span>
+                )}
+              </span>
+              <strong>{source.name}</strong>
+              <em>{source.kind === 'screen' ? 'Screen' : 'Window'}</em>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

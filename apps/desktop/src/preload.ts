@@ -9,10 +9,16 @@ import {
 import {
   DESKTOP_CLIENT_COMMAND_CHANNEL,
   DESKTOP_CLIENT_STATE_CHANNEL,
+  DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL,
+  DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL,
   isDesktopClientCommand,
+  parseDesktopCapturePickerRequest,
+  parseDesktopCapturePickerResponse,
   parseDesktopClientState,
   type DesktopClientCommand,
   type DesktopClientState,
+  type DesktopCapturePickerRequest,
+  type DesktopCapturePickerResponse,
 } from './desktopNative'
 import {
   DEEP_LINK_ROUTE_CHANNEL,
@@ -72,6 +78,33 @@ contextBridge.exposeInMainWorld('openCordDesktop', {
       return () => {
         ipcRenderer.removeListener(DESKTOP_CLIENT_COMMAND_CHANNEL, listener)
       }
+    },
+  },
+  screenShare: {
+    onPickerRequest(handler: (request: DesktopCapturePickerRequest) => void) {
+      if (typeof handler !== 'function') {
+        return () => undefined
+      }
+
+      const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        const request = parseDesktopCapturePickerRequest(payload)
+        if (request) {
+          handler(request)
+        }
+      }
+
+      ipcRenderer.on(DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL, listener)
+      return () => {
+        ipcRenderer.removeListener(DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL, listener)
+      }
+    },
+    respond(response: DesktopCapturePickerResponse) {
+      const payload = parseDesktopCapturePickerResponse(response)
+      if (!payload) {
+        return Promise.resolve(false)
+      }
+
+      return ipcRenderer.invoke(DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL, payload) as Promise<boolean>
     },
   },
   deviceSessions: {

@@ -2,6 +2,10 @@ import type { MenuItemConstructorOptions } from 'electron'
 
 export const DESKTOP_CLIENT_STATE_CHANNEL = 'opencord:desktop:client-state'
 export const DESKTOP_CLIENT_COMMAND_CHANNEL = 'opencord:desktop:command'
+export const DESKTOP_CAPTURE_PICKER_REQUEST_CHANNEL =
+  'opencord:desktop-capture:picker-request'
+export const DESKTOP_CAPTURE_PICKER_RESPONSE_CHANNEL =
+  'opencord:desktop-capture:picker-response'
 
 export type DesktopSettingsPanel =
   | 'account'
@@ -59,6 +63,23 @@ export type DesktopClientCommand =
   | { kind: 'voice-toggle-deafen' }
   | { kind: 'voice-leave' }
   | { kind: 'screen-share-toggle' }
+
+export type DesktopCaptureSource = {
+  id: string
+  kind: 'screen' | 'window'
+  name: string
+  thumbnailDataUrl: string | null
+}
+
+export type DesktopCapturePickerRequest = {
+  requestId: string
+  sources: DesktopCaptureSource[]
+}
+
+export type DesktopCapturePickerResponse = {
+  requestId: string
+  sourceId: string | null
+}
 
 type NativeMenuOptions = {
   isDev: boolean
@@ -184,6 +205,44 @@ export function parseDesktopClientCommand(value: unknown): DesktopClientCommand 
     default:
       return null
   }
+}
+
+export function parseDesktopCapturePickerRequest(
+  value: unknown,
+): DesktopCapturePickerRequest | null {
+  const payload = objectValue(value)
+  if (!payload) {
+    return null
+  }
+
+  const requestId = nonEmptyString(payload.requestId)
+  const sources = arrayValue(payload.sources, parseDesktopCaptureSource, 80)
+  if (!requestId || !sources) {
+    return null
+  }
+
+  return { requestId, sources }
+}
+
+export function parseDesktopCapturePickerResponse(
+  value: unknown,
+): DesktopCapturePickerResponse | null {
+  const payload = objectValue(value)
+  if (!payload) {
+    return null
+  }
+
+  const requestId = nonEmptyString(payload.requestId)
+  if (!requestId) {
+    return null
+  }
+
+  if (payload.sourceId === null) {
+    return { requestId, sourceId: null }
+  }
+
+  const sourceId = nonEmptyString(payload.sourceId)
+  return sourceId ? { requestId, sourceId } : null
 }
 
 export function buildDesktopTrayMenuTemplate(
@@ -442,6 +501,32 @@ function parseDesktopClientVoiceState(value: unknown): DesktopClientVoiceState |
   }
 }
 
+function parseDesktopCaptureSource(value: unknown): DesktopCaptureSource | null {
+  const payload = objectValue(value)
+  if (!payload) {
+    return null
+  }
+
+  const id = nonEmptyString(payload.id)
+  const name = nonEmptyString(payload.name)
+  const thumbnailDataUrl = nullableDataUrl(payload.thumbnailDataUrl)
+  if (
+    !id ||
+    !name ||
+    (payload.kind !== 'screen' && payload.kind !== 'window') ||
+    thumbnailDataUrl === undefined
+  ) {
+    return null
+  }
+
+  return {
+    id,
+    kind: payload.kind,
+    name,
+    thumbnailDataUrl,
+  }
+}
+
 function parseNullable<T>(
   value: unknown,
   parser: (candidate: unknown) => T | null,
@@ -482,6 +567,26 @@ function nullableString(value: unknown) {
   }
 
   return typeof value === 'string' && value.trim().length > 0 ? cleanString(value) : undefined
+}
+
+function nullableDataUrl(value: unknown) {
+  if (value === null) {
+    return null
+  }
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const normalized = value.trim()
+  if (
+    normalized === '' ||
+    normalized.length > 1_500_000 ||
+    !normalized.startsWith('data:image/')
+  ) {
+    return undefined
+  }
+
+  return normalized
 }
 
 function cleanString(value: string) {
