@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Meeting } from '@opencord/api-client'
 import {
   buildOpenCordRoutePath,
   type OpenCordRouteTarget,
@@ -33,6 +34,24 @@ export type MobileMessageTarget = {
   messageId: string
 }
 
+export type MobileMeetingForm = {
+  mode: 'create' | 'edit'
+  title: string
+  startsAt: string
+  endsAt: string
+  reminderOffsetMinutes: number
+  reminderChannel: 'in_app' | 'email'
+  organizationId?: string
+  spaceId?: string | null
+  channelId?: string | null
+  meetingId?: string
+}
+
+export type MobileMeetingLocalReminder = {
+  channel: 'in_app' | 'email'
+  offsetMinutes: number
+}
+
 export type MobileSessionStore = {
   account: MobileAccountMetadata | null
   activeServerId: string | null
@@ -62,6 +81,30 @@ export type MobileChatStore = {
   openMessageActions: (target: MobileMessageTarget | null) => void
   setComposerText: (channelId: string, text: string) => void
   setPendingAttachments: (channelId: string, attachments: MobilePendingAttachment[]) => void
+}
+
+export type MobileMeetingsStore = {
+  form: MobileMeetingForm | null
+  localRemindersByMeetingId: Record<string, MobileMeetingLocalReminder>
+  meetings: Meeting[]
+  selectedMeetingId: string | null
+  closeForm: () => void
+  openCreateForm: (options: {
+    channelId?: string | null
+    defaultEndsAt: string
+    defaultStartsAt: string
+    organizationId?: string
+    spaceId?: string | null
+  }) => void
+  openEditForm: (meeting: Meeting) => void
+  selectMeeting: (meetingId: string | null) => void
+  setFormField: <Key extends keyof MobileMeetingForm>(
+    key: Key,
+    value: MobileMeetingForm[Key],
+  ) => void
+  setLocalReminder: (meetingId: string, reminder: MobileMeetingLocalReminder) => void
+  setMeetings: (meetings: Meeting[]) => void
+  upsertMeeting: (meeting: Meeting) => void
 }
 
 export type MobileVoiceScreenShareWatcher =
@@ -126,6 +169,23 @@ const initialChatData = {
   | 'openMessageActions'
   | 'setComposerText'
   | 'setPendingAttachments'
+>
+
+const initialMeetingsData = {
+  form: null,
+  localRemindersByMeetingId: {},
+  meetings: [],
+  selectedMeetingId: null,
+} satisfies Omit<
+  MobileMeetingsStore,
+  | 'closeForm'
+  | 'openCreateForm'
+  | 'openEditForm'
+  | 'selectMeeting'
+  | 'setFormField'
+  | 'setLocalReminder'
+  | 'setMeetings'
+  | 'upsertMeeting'
 >
 
 const initialVoiceData = {
@@ -216,6 +276,65 @@ export const useMobileChatStore = create<MobileChatStore>((set) => ({
     })),
 }))
 
+export const useMobileMeetingsStore = create<MobileMeetingsStore>((set) => ({
+  ...initialMeetingsData,
+  closeForm: () => set({ form: null }),
+  openCreateForm: ({ channelId, defaultEndsAt, defaultStartsAt, organizationId, spaceId }) =>
+    set({
+      form: {
+        channelId,
+        endsAt: defaultEndsAt,
+        mode: 'create',
+        organizationId,
+        reminderChannel: 'in_app',
+        reminderOffsetMinutes: 10,
+        spaceId,
+        startsAt: defaultStartsAt,
+        title: '',
+      },
+    }),
+  openEditForm: (meeting) =>
+    set({
+      form: {
+        channelId: meeting.channelId,
+        endsAt: isoToLocalDateTimeInput(meeting.endsAt),
+        meetingId: meeting.id,
+        mode: 'edit',
+        organizationId: meeting.organizationId,
+        reminderChannel: meeting.reminders[0]?.channel === 'email' ? 'email' : 'in_app',
+        reminderOffsetMinutes: meeting.reminders[0]?.offsetMinutes ?? 10,
+        spaceId: meeting.spaceId,
+        startsAt: isoToLocalDateTimeInput(meeting.startsAt),
+        title: meeting.title,
+      },
+      selectedMeetingId: meeting.id,
+    }),
+  selectMeeting: (selectedMeetingId) => set({ selectedMeetingId }),
+  setFormField: (key, value) =>
+    set((state) => ({
+      form: state.form ? { ...state.form, [key]: value } : state.form,
+    })),
+  setLocalReminder: (meetingId, reminder) =>
+    set((state) => ({
+      localRemindersByMeetingId: {
+        ...state.localRemindersByMeetingId,
+        [meetingId]: reminder,
+      },
+    })),
+  setMeetings: (meetings) => set({ meetings: sortMeetings(meetings) }),
+  upsertMeeting: (meeting) =>
+    set((state) => ({
+      meetings: sortMeetings([
+        ...state.meetings.filter((candidate) => candidate.id !== meeting.id),
+        meeting,
+      ]),
+      selectedMeetingId:
+        state.selectedMeetingId && state.selectedMeetingId !== meeting.id
+          ? state.selectedMeetingId
+          : meeting.id,
+    })),
+}))
+
 export const useMobileVoiceStore = create<MobileVoiceStore>((set) => ({
   ...initialVoiceData,
   joinRoute: (activeRoute) =>
@@ -242,8 +361,34 @@ export const useMobileSettingsStore = create<MobileSettingsStore>((set) => ({
 export function resetMobileStoresForTest() {
   useMobileSessionStore.setState(initialSessionData)
   useMobileChatStore.setState(initialChatData)
+  useMobileMeetingsStore.setState(initialMeetingsData)
   useMobileVoiceStore.setState(initialVoiceData)
   useMobileSettingsStore.setState(initialSettingsData)
+}
+
+function sortMeetings(meetings: Meeting[]) {
+  return [...meetings].sort((left, right) => {
+    const statusRank = meetingStatusRank(left.status) - meetingStatusRank(right.status)
+    if (statusRank !== 0) {
+      return statusRank
+    }
+
+    return left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id)
+  })
+}
+
+function meetingStatusRank(status: string) {
+  return status === 'scheduled' ? 0 : 1
+}
+
+function isoToLocalDateTimeInput(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  const offsetMs = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
 }
 
 function serverIdFromRouteTarget(routeTarget: OpenCordRouteTarget) {

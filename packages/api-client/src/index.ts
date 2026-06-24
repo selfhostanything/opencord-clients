@@ -223,6 +223,14 @@ export type CreateMeetingRequest = {
   }>
 }
 
+export type UpdateMeetingRequest = {
+  title?: string
+  description?: string | null
+  startsAt?: string
+  endsAt?: string
+  timezone?: string
+}
+
 export type CreateBotApplicationRequest = {
   name: string
   description?: string
@@ -1151,6 +1159,47 @@ export class OpenCordApiClient {
     )
 
     return arrayValue(payload.meetings).map(meetingFromPayload)
+  }
+
+  async getMeeting(meetingId: string): Promise<Meeting> {
+    const payload = await this.requestJson<MeetingResourcePayload>(
+      `/meetings/${encodeURIComponent(meetingId)}`,
+    )
+
+    return meetingFromPayload(payload.meeting)
+  }
+
+  async updateMeeting(meetingId: string, request: UpdateMeetingRequest): Promise<Meeting> {
+    const payload = await this.requestJson<MeetingResourcePayload>(
+      `/meetings/${encodeURIComponent(meetingId)}`,
+      {
+        body: JSON.stringify({
+          description: request.description,
+          ends_at: request.endsAt,
+          starts_at: request.startsAt,
+          timezone: request.timezone,
+          title: request.title,
+        }),
+        method: 'PATCH',
+      },
+    )
+
+    return meetingFromPayload(payload.meeting)
+  }
+
+  async cancelMeeting(meetingId: string): Promise<Meeting> {
+    const payload = await this.requestJson<MeetingResourcePayload>(
+      `/meetings/${encodeURIComponent(meetingId)}`,
+      {
+        method: 'DELETE',
+      },
+    )
+
+    return meetingFromPayload(payload.meeting)
+  }
+
+  meetingInviteIcsUrl(meetingId: string): string {
+    return this.endpoint(`/meetings/${encodeURIComponent(meetingId)}/invite.ics`)
   }
 
   async registerPushToken(request: RegisterPushTokenRequest): Promise<PushToken> {

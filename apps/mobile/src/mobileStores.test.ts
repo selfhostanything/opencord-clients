@@ -5,6 +5,7 @@ import type { OpenCordRouteTarget } from '@opencord/client-contracts'
 import {
   resetMobileStoresForTest,
   useMobileChatStore,
+  useMobileMeetingsStore,
   useMobileSessionStore,
   useMobileSettingsStore,
   useMobileVoiceStore,
@@ -102,6 +103,80 @@ describe('mobile Zustand stores', () => {
     expect(useMobileChatStore.getState().messageActionSheetTarget).toBeNull()
   })
 
+  it('tracks mobile meeting list, detail, form, and local reminders', () => {
+    useMobileMeetingsStore.getState().setMeetings([
+      mobileMeetingFixture({
+        id: 'meeting-cancelled',
+        status: 'cancelled',
+        title: 'Cancelled sync',
+      }),
+      mobileMeetingFixture({
+        id: 'meeting-1',
+        title: 'Roadmap Review',
+      }),
+    ])
+    useMobileMeetingsStore.getState().selectMeeting('meeting-1')
+    useMobileMeetingsStore.getState().openCreateForm({
+      channelId: 'general',
+      defaultStartsAt: '2026-06-25T10:00',
+      defaultEndsAt: '2026-06-25T10:30',
+      organizationId: 'org-1',
+      spaceId: 'space-1',
+    })
+    useMobileMeetingsStore.getState().setFormField('title', 'Mobile standup')
+    useMobileMeetingsStore.getState().setFormField('reminderOffsetMinutes', 15)
+
+    expect(useMobileMeetingsStore.getState()).toMatchObject({
+      form: {
+        channelId: 'general',
+        endsAt: '2026-06-25T10:30',
+        mode: 'create',
+        organizationId: 'org-1',
+        reminderOffsetMinutes: 15,
+        spaceId: 'space-1',
+        startsAt: '2026-06-25T10:00',
+        title: 'Mobile standup',
+      },
+      selectedMeetingId: 'meeting-1',
+    })
+    expect(useMobileMeetingsStore.getState().meetings.map((meeting) => meeting.id)).toEqual([
+      'meeting-1',
+      'meeting-cancelled',
+    ])
+
+    useMobileMeetingsStore.getState().openEditForm(mobileMeetingFixture({
+      id: 'meeting-1',
+      title: 'Roadmap Review',
+    }))
+    expect(useMobileMeetingsStore.getState().form).toMatchObject({
+      meetingId: 'meeting-1',
+      mode: 'edit',
+      title: 'Roadmap Review',
+    })
+
+    useMobileMeetingsStore.getState().setLocalReminder('meeting-1', {
+      channel: 'in_app',
+      offsetMinutes: 10,
+    })
+    useMobileMeetingsStore.getState().upsertMeeting(mobileMeetingFixture({
+      id: 'meeting-1',
+      status: 'cancelled',
+    }))
+    expect(useMobileMeetingsStore.getState().localRemindersByMeetingId).toEqual({
+      'meeting-1': {
+        channel: 'in_app',
+        offsetMinutes: 10,
+      },
+    })
+    expect(useMobileMeetingsStore.getState().meetings[0]).toMatchObject({
+      id: 'meeting-1',
+      status: 'cancelled',
+    })
+
+    useMobileMeetingsStore.getState().closeForm()
+    expect(useMobileMeetingsStore.getState().form).toBeNull()
+  })
+
   it('tracks voice route, mute/deafen controls, and screen-share watcher state', () => {
     useMobileVoiceStore.getState().joinRoute({
       kind: 'channel',
@@ -162,3 +237,31 @@ describe('mobile Zustand stores', () => {
     })
   })
 })
+
+function mobileMeetingFixture(overrides: Partial<ReturnType<typeof baseMobileMeetingFixture>> = {}) {
+  return {
+    ...baseMobileMeetingFixture(),
+    ...overrides,
+  }
+}
+
+function baseMobileMeetingFixture() {
+  return {
+    id: 'meeting-1',
+    organizationId: 'org-1',
+    spaceId: 'space-1',
+    channelId: 'general',
+    createdByUserId: 'user-1',
+    title: 'Roadmap Review',
+    description: 'Launch scope',
+    status: 'scheduled',
+    startsAt: '2026-06-25T10:00:00Z',
+    endsAt: '2026-06-25T10:30:00Z',
+    timezone: 'Asia/Bangkok',
+    joinSlug: 'mtg-meeting-1',
+    joinUrl: 'https://chat.example.com/join/mtg-meeting-1',
+    cancelledAt: null,
+    attendees: [],
+    reminders: [],
+  }
+}

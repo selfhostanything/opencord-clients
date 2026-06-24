@@ -18,6 +18,10 @@ const requiredOpenApiPaths = [
   '/join/{join_slug}',
   '/attachments/presign',
   '/attachments/{attachment_id}/content',
+  '/organizations/{organization_id}/meetings',
+  '/meetings/{meeting_id}',
+  '/meetings/{meeting_id}/invite.ics',
+  '/meetings/{meeting_id}/media/token',
   '/organizations/{organization_id}/bot-applications',
   '/channels/{channel_id}/webhooks',
 ] as const satisfies readonly (keyof paths)[]
@@ -30,11 +34,34 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
   })
 }
 
+function meetingPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+    organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+    space_id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+    channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+    created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+    title: 'Roadmap Review',
+    description: 'Launch scope',
+    status: 'scheduled',
+    starts_at: '2026-06-24T09:00:00Z',
+    ends_at: '2026-06-24T09:30:00Z',
+    timezone: 'Asia/Bangkok',
+    join_slug: 'mtg-01973f83f22a73baae765a045c52fca1',
+    join_url: 'https://chat.example.com/join/mtg-01973f83f22a73baae765a045c52fca1',
+    cancelled_at: null,
+    attendees: [],
+    reminders: [],
+    ...overrides,
+  }
+}
+
 describe('OpenCord API client', () => {
   it('keeps generated OpenAPI path types at the package boundary', () => {
     expect(requiredOpenApiPaths).toContain('/healthz')
     expect(requiredOpenApiPaths).toContain('/auth/login')
     expect(requiredOpenApiPaths).toContain('/auth/refresh')
+    expect(requiredOpenApiPaths).toContain('/meetings/{meeting_id}')
     expect(requiredOpenApiPaths).toContain('/channels/{channel_id}/webhooks')
   })
 
@@ -1495,6 +1522,108 @@ describe('OpenCord API client', () => {
           Accept: 'application/json',
           Authorization: 'Bearer session-token',
         },
+      },
+    )
+  })
+
+  it('gets, updates, cancels, and builds invite URLs for scheduled meetings', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          meeting: meetingPayload({
+            title: 'Roadmap Review',
+            status: 'scheduled',
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          meeting: meetingPayload({
+            title: 'Roadmap Review Updated',
+            starts_at: '2026-06-24T10:00:00Z',
+            ends_at: '2026-06-24T10:45:00Z',
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          meeting: meetingPayload({
+            cancelled_at: '2026-06-24T08:00:00Z',
+            status: 'cancelled',
+            title: 'Roadmap Review Updated',
+          }),
+        }),
+      )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+    const meetingId = '01973f83-f22a-73ba-ae76-5a045c52fca1'
+
+    await expect(client.getMeeting(meetingId)).resolves.toMatchObject({
+      id: meetingId,
+      status: 'scheduled',
+      title: 'Roadmap Review',
+    })
+    await expect(
+      client.updateMeeting(meetingId, {
+        endsAt: '2026-06-24T10:45:00Z',
+        startsAt: '2026-06-24T10:00:00Z',
+        title: 'Roadmap Review Updated',
+      }),
+    ).resolves.toMatchObject({
+      endsAt: '2026-06-24T10:45:00Z',
+      startsAt: '2026-06-24T10:00:00Z',
+      title: 'Roadmap Review Updated',
+    })
+    await expect(client.cancelMeeting(meetingId)).resolves.toMatchObject({
+      cancelledAt: '2026-06-24T08:00:00Z',
+      status: 'cancelled',
+    })
+    expect(client.meetingInviteIcsUrl(meetingId)).toBe(
+      'https://chat.example.com/meetings/01973f83-f22a-73ba-ae76-5a045c52fca1/invite.ics',
+    )
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://chat.example.com/meetings/01973f83-f22a-73ba-ae76-5a045c52fca1',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://chat.example.com/meetings/01973f83-f22a-73ba-ae76-5a045c52fca1',
+      {
+        body: JSON.stringify({
+          description: undefined,
+          ends_at: '2026-06-24T10:45:00Z',
+          starts_at: '2026-06-24T10:00:00Z',
+          timezone: undefined,
+          title: 'Roadmap Review Updated',
+        }),
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        method: 'PATCH',
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://chat.example.com/meetings/01973f83-f22a-73ba-ae76-5a045c52fca1',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+        method: 'DELETE',
       },
     )
   })

@@ -30,6 +30,7 @@ import {
   OpenCordApiError,
   type AuthResult,
   type Channel,
+  type Meeting,
   type MessageAttachment,
 } from '@opencord/api-client'
 import {
@@ -47,6 +48,8 @@ import {
 import {
   activeMobileServerConnection,
   createInitialMobileState,
+  DEFAULT_MOBILE_ORGANIZATION_ID,
+  DEFAULT_MOBILE_SPACE_ID,
   mobileDefaultOpenCordServerUrlForPlatform,
   mobileChannelsFromApiChannels,
   mobileCanListenToVoice,
@@ -76,11 +79,14 @@ import {
 } from './src/mobileState'
 import {
   useMobileChatStore,
+  useMobileMeetingsStore,
   useMobileSessionStore,
   useMobileSettingsStore,
+  type MobileMeetingForm,
   type MobilePendingAttachment,
 } from './src/mobileStores'
 import { createMobileDeviceSessionStores } from './src/mobileDeviceSessionStorage'
+import { mobileMeetingIdFromUrl } from './src/mobileDeepLinks'
 import {
   mobileE2ECommandFromUrl,
   mobileE2EStateUrl,
@@ -135,9 +141,12 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const { height } = useWindowDimensions()
   const e2eAutoJoinStartedRef = useRef(false)
   const e2eAutoJoinMeetingStartedRef = useRef(false)
+  const e2eMeetingRouteOpenedRef = useRef(false)
   const e2eAutoOpenTextChannelStartedRef = useRef(false)
   const e2eCommandPollInFlightRef = useRef(false)
   const e2eLoginStartedRef = useRef(false)
+  const lastHandledIncomingUrlRef = useRef<string | null>(null)
+  const pendingMeetingDeepLinkRef = useRef<string | null>(null)
   const restoreAttemptedServerUrlsRef = useRef(new Set<string>())
   const mobileDeviceSessionStoresRef = useRef(createMobileDeviceSessionStores())
   const lastE2EStateSignatureRef = useRef<string | null>(null)
@@ -160,6 +169,22 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const setMobilePendingAttachments = useMobileChatStore(
     (store) => store.setPendingAttachments,
   )
+  const closeMobileMeetingForm = useMobileMeetingsStore((store) => store.closeForm)
+  const localMeetingReminders = useMobileMeetingsStore(
+    (store) => store.localRemindersByMeetingId,
+  )
+  const meetings = useMobileMeetingsStore((store) => store.meetings)
+  const meetingForm = useMobileMeetingsStore((store) => store.form)
+  const openMobileMeetingCreateForm = useMobileMeetingsStore((store) => store.openCreateForm)
+  const openMobileMeetingEditForm = useMobileMeetingsStore((store) => store.openEditForm)
+  const selectMobileMeeting = useMobileMeetingsStore((store) => store.selectMeeting)
+  const selectedMeetingId = useMobileMeetingsStore((store) => store.selectedMeetingId)
+  const setMobileMeetingFormField = useMobileMeetingsStore((store) => store.setFormField)
+  const setMobileMeetings = useMobileMeetingsStore((store) => store.setMeetings)
+  const setMobileMeetingLocalReminder = useMobileMeetingsStore(
+    (store) => store.setLocalReminder,
+  )
+  const upsertMobileMeeting = useMobileMeetingsStore((store) => store.upsertMeeting)
   const setMobileAccountMetadata = useMobileSessionStore((store) => store.setAccountMetadata)
   const setMobileRouteTarget = useMobileSessionStore((store) => store.setRouteTarget)
   const openMobileSettingsPanel = useMobileSettingsStore((store) => store.openPanel)
@@ -170,6 +195,8 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginStatus, setLoginStatus] = useState<'idle' | 'loading'>('idle')
   const [chatFeedback, setChatFeedback] = useState<string | null>(null)
+  const [meetingFeedback, setMeetingFeedback] = useState<string | null>(null)
+  const [meetingPanelOpen, setMeetingPanelOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [serverManagerOpen, setServerManagerOpen] = useState(false)
   const activeChannel = selectedChannel(state)
@@ -179,6 +206,8 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const timelineGroups = useMemo(() => mobileMessageTimelineGroups(state), [state])
   const permissionRows = useMemo(() => mobileMediaPermissionRows(state), [state])
   const workspaceSections = useMemo(() => mobileWorkspaceNavigatorSections(state), [state])
+  const selectedMeeting =
+    meetings.find((meeting) => meeting.id === selectedMeetingId) ?? meetings[0] ?? null
   const replyPreviewMessage = replyTarget
     ? state.messages.find((message) => message.id === replyTarget.messageId)
     : null
@@ -299,6 +328,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       return
     }
     if (e2eLaunchConfig.demoWorkspace) {
+      setMobileMeetings(seedMobileMeetings(e2eLaunchConfig.email))
       dispatch({
         type: 'login.submit',
         serverUrl: e2eLaunchConfig.serverUrl,
@@ -350,6 +380,33 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
 
   useEffect(() => {
     if (
+      e2eMeetingRouteOpenedRef.current ||
+      !e2eLaunchConfig?.meetingId ||
+      e2eLaunchConfig.autoJoinMeeting ||
+      state.screen !== 'channels'
+    ) {
+      return
+    }
+
+    const meeting =
+      meetings.find((candidate) => candidate.id === e2eLaunchConfig.meetingId) ??
+      meetings[0] ??
+      null
+    if (!meeting) {
+      return
+    }
+
+    e2eMeetingRouteOpenedRef.current = true
+    openMobileMeetingDetail(meeting)
+  }, [
+    e2eLaunchConfig?.autoJoinMeeting,
+    e2eLaunchConfig?.meetingId,
+    meetings,
+    state.screen,
+  ])
+
+  useEffect(() => {
+    if (
       e2eAutoJoinMeetingStartedRef.current ||
       !e2eLaunchConfig?.autoJoinMeeting ||
       !e2eLaunchConfig.meetingId ||
@@ -367,12 +424,8 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   }, [e2eLaunchConfig, state.screen, state.sessionToken])
 
   useEffect(() => {
-    if (!e2eLaunchConfig) {
-      return
-    }
-
     const handleUrl = ({ url }: { url: string }) => {
-      runMobileE2ECommand(mobileE2ECommandFromUrl(url))
+      handleIncomingUrl(url)
     }
 
     const subscription = Linking.addEventListener('url', handleUrl)
@@ -385,7 +438,23 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     return () => {
       subscription.remove()
     }
-  }, [e2eLaunchConfig, state.voice.connectedChannelId, state.voice.selfDeaf, state.voice.selfMute])
+  }, [
+    e2eLaunchConfig,
+    meetings,
+    state.screen,
+    state.voice.connectedChannelId,
+    state.voice.selfDeaf,
+    state.voice.selfMute,
+  ])
+
+  useEffect(() => {
+    const pendingMeetingDeepLink = pendingMeetingDeepLinkRef.current
+    if (!pendingMeetingDeepLink || meetings.length === 0) {
+      return
+    }
+
+    openMobileMeetingFromUrl(pendingMeetingDeepLink)
+  }, [meetings])
 
   useEffect(() => {
     const commandUrl = e2eLaunchConfig?.commandUrl
@@ -543,6 +612,28 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     })
   }
 
+  async function refreshMobileMeetings(
+    client: ReturnType<typeof createOpenCordApiClient>,
+    channels: Array<{ organizationId?: string }>,
+  ) {
+    const organizationId = meetingOrganizationIdFromChannels(channels)
+    if (!organizationId) {
+      setMobileMeetings([])
+      return
+    }
+
+    try {
+      const loadedMeetings = await client.listMeetings(organizationId)
+      setMobileMeetings(loadedMeetings)
+      if (loadedMeetings.length > 0 && !selectedMeetingId) {
+        selectMobileMeeting(loadedMeetings[0]?.id ?? null)
+      }
+      setMeetingFeedback(null)
+    } catch (error) {
+      setMeetingFeedback(errorMessage(error, 'Unable to load meetings.'))
+    }
+  }
+
   async function submitLogin(credentials?: MobileLoginCredentials) {
     const loginServerUrl = credentials?.serverUrl ?? serverUrl
     const loginEmail = credentials?.email ?? email
@@ -573,6 +664,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         sessionToken: authResult.session.token,
       })
       const channels = await ensureMobileWorkspaceChannels(client, authResult.user.email)
+      await refreshMobileMeetings(client, channels)
       dispatch({
         type: 'login.succeeded',
         serverUrl: loginServerUrl,
@@ -613,6 +705,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         sessionToken: authResult.session.token,
       })
       const channels = await ensureMobileWorkspaceChannels(client, authResult.user.email)
+      await refreshMobileMeetings(client, channels)
       dispatch({
         type: 'login.succeeded',
         serverUrl: storedSession.serverUrl,
@@ -659,6 +752,263 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
 
     dispatch({ type: 'server.add', baseUrl })
     setServerManagerOpen(false)
+  }
+
+  async function openMobileCalendarPanel() {
+    setMeetingPanelOpen(true)
+    setSettingsOpen(false)
+    setServerManagerOpen(false)
+
+    if (!state.sessionToken) {
+      return
+    }
+
+    const organizationId = meetingOrganizationIdFromMobileChannels(state.channels)
+    if (!organizationId) {
+      setMeetingFeedback('Meetings need an organization context before sync.')
+      return
+    }
+
+    const client = createOpenCordApiClient({
+      baseUrl: state.serverUrl,
+      sessionToken: state.sessionToken,
+    })
+    await refreshMobileMeetings(client, state.channels)
+    const refreshedMeetings = useMobileMeetingsStore.getState()
+    if (!refreshedMeetings.selectedMeetingId && refreshedMeetings.meetings[0]) {
+      openMobileMeetingDetail(refreshedMeetings.meetings[0])
+    }
+  }
+
+  function startCreateMobileMeeting() {
+    const startsAt = defaultMeetingLocalDateTime()
+    openMobileMeetingCreateForm({
+      channelId: activeChannel.kind === 'text' ? activeChannel.id : null,
+      defaultEndsAt: addMinutesToLocalDateTime(startsAt, 30),
+      defaultStartsAt: startsAt,
+      organizationId:
+        activeChannel.organizationId ??
+        meetingOrganizationIdFromMobileChannels(state.channels) ??
+        undefined,
+      spaceId: activeChannel.spaceId ?? DEFAULT_MOBILE_SPACE_ID,
+    })
+    setMeetingPanelOpen(true)
+    setMeetingFeedback(null)
+  }
+
+  function openMobileMeetingDetail(meeting: Meeting) {
+    selectMobileMeeting(meeting.id)
+    setMeetingPanelOpen(true)
+    setMeetingFeedback(null)
+    setMobileRouteTarget({
+      kind: 'meeting',
+      serverId: activeServer?.id,
+      organizationId: meeting.organizationId,
+      spaceId: meeting.spaceId ?? undefined,
+      channelId: meeting.channelId ?? undefined,
+      meetingId: meeting.id,
+    })
+  }
+
+  async function saveMobileMeetingForm() {
+    const form = useMobileMeetingsStore.getState().form
+    if (!form) {
+      return
+    }
+
+    const title = form.title.trim()
+    if (!title) {
+      setMeetingFeedback('Meeting title is required.')
+      return
+    }
+
+    const startsAt = localDateTimeToIso(form.startsAt)
+    const endsAt = localDateTimeToIso(form.endsAt)
+    if (!startsAt || !endsAt) {
+      setMeetingFeedback('Use valid start and end times.')
+      return
+    }
+
+    if (new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
+      setMeetingFeedback('End time must be after start time.')
+      return
+    }
+
+    try {
+      const client = state.sessionToken
+        ? createOpenCordApiClient({
+            baseUrl: state.serverUrl,
+            sessionToken: state.sessionToken,
+          })
+        : null
+      const savedMeeting =
+        form.mode === 'edit' && form.meetingId
+          ? await saveMobileMeetingEdit(client, form, startsAt, endsAt, title)
+          : await saveMobileMeetingCreate(client, form, startsAt, endsAt, title)
+      upsertMobileMeeting(savedMeeting)
+      setMobileMeetingLocalReminder(savedMeeting.id, {
+        channel: form.reminderChannel,
+        offsetMinutes: form.reminderOffsetMinutes,
+      })
+      selectMobileMeeting(savedMeeting.id)
+      closeMobileMeetingForm()
+      setMeetingFeedback(null)
+    } catch (error) {
+      setMeetingFeedback(errorMessage(error, 'Unable to save meeting.'))
+    }
+  }
+
+  async function saveMobileMeetingCreate(
+    client: ReturnType<typeof createOpenCordApiClient> | null,
+    form: MobileMeetingForm,
+    startsAt: string,
+    endsAt: string,
+    title: string,
+  ) {
+    const organizationId =
+      form.organizationId ?? meetingOrganizationIdFromMobileChannels(state.channels)
+    if (client && organizationId) {
+      return client.createMeeting(organizationId, {
+        channelId: form.channelId,
+        endsAt,
+        reminders: mobileMeetingRemindersForForm(form, state.account?.email),
+        spaceId: form.spaceId,
+        startsAt,
+        timezone: resolvedTimeZone(),
+        title,
+      })
+    }
+
+    return localMobileMeetingFromForm(form, {
+      email: state.account?.email,
+      endsAt,
+      serverUrl: state.serverUrl,
+      startsAt,
+      title,
+    })
+  }
+
+  async function saveMobileMeetingEdit(
+    client: ReturnType<typeof createOpenCordApiClient> | null,
+    form: MobileMeetingForm,
+    startsAt: string,
+    endsAt: string,
+    title: string,
+  ) {
+    const existing = meetings.find((meeting) => meeting.id === form.meetingId)
+    if (client && form.meetingId && isServerBackedId(form.meetingId)) {
+      return client.updateMeeting(form.meetingId, {
+        endsAt,
+        startsAt,
+        timezone: resolvedTimeZone(),
+        title,
+      })
+    }
+
+    return {
+      ...(existing ?? localMobileMeetingFromForm(form, {
+        email: state.account?.email,
+        endsAt,
+        serverUrl: state.serverUrl,
+        startsAt,
+        title,
+      })),
+      endsAt,
+      startsAt,
+      title,
+      timezone: resolvedTimeZone(),
+    }
+  }
+
+  async function cancelMobileMeeting(meeting: Meeting) {
+    try {
+      const client =
+        state.sessionToken && isServerBackedId(meeting.id)
+          ? createOpenCordApiClient({
+              baseUrl: state.serverUrl,
+              sessionToken: state.sessionToken,
+            })
+          : null
+      const cancelledMeeting = client
+        ? await client.cancelMeeting(meeting.id)
+        : {
+            ...meeting,
+            cancelledAt: new Date().toISOString(),
+            status: 'cancelled',
+          }
+      upsertMobileMeeting(cancelledMeeting)
+      setMeetingFeedback(null)
+    } catch (error) {
+      setMeetingFeedback(errorMessage(error, 'Unable to cancel meeting.'))
+    }
+  }
+
+  function copyMeetingJoinUrl(meeting: Meeting) {
+    Clipboard.setString(meeting.joinUrl)
+    setMeetingFeedback('Meeting join URL copied.')
+  }
+
+  function openMeetingJoinUrl(meeting: Meeting) {
+    void Linking.openURL(meeting.joinUrl)
+  }
+
+  function copyMeetingCalendarUrl(meeting: Meeting) {
+    const client = createOpenCordApiClient({
+      baseUrl: state.serverUrl,
+      sessionToken: state.sessionToken ?? undefined,
+    })
+    Clipboard.setString(client.meetingInviteIcsUrl(meeting.id))
+    setMeetingFeedback('Calendar invite URL copied.')
+  }
+
+  function openMeetingCalendarUrl(meeting: Meeting) {
+    const client = createOpenCordApiClient({
+      baseUrl: state.serverUrl,
+      sessionToken: state.sessionToken ?? undefined,
+    })
+    void Linking.openURL(client.meetingInviteIcsUrl(meeting.id))
+  }
+
+  function handleIncomingUrl(url: string) {
+    const normalizedUrl = url.trim()
+    if (!normalizedUrl || lastHandledIncomingUrlRef.current === normalizedUrl) {
+      return
+    }
+
+    lastHandledIncomingUrlRef.current = normalizedUrl
+    const e2eCommand = e2eLaunchConfig ? mobileE2ECommandFromUrl(normalizedUrl) : null
+    if (e2eCommand) {
+      runMobileE2ECommand(e2eCommand)
+      return
+    }
+
+    openMobileMeetingFromUrl(normalizedUrl)
+  }
+
+  function openMobileMeetingFromUrl(url: string) {
+    const meetingId = mobileMeetingIdFromUrl(url)
+    const meeting = useMobileMeetingsStore
+      .getState()
+      .meetings.find(
+        (candidate) =>
+          (meetingId && candidate.id === meetingId) ||
+          candidate.joinUrl.trim() === url.trim(),
+      )
+
+    if (!meeting) {
+      if (meetingId) {
+        pendingMeetingDeepLinkRef.current = url
+        setMeetingPanelOpen(true)
+        setMeetingFeedback('Meeting link received. Sync meetings to finish routing.')
+        return true
+      }
+
+      return false
+    }
+
+    pendingMeetingDeepLinkRef.current = null
+    openMobileMeetingDetail(meeting)
+    return true
   }
 
   async function pickMobileAttachments() {
@@ -1257,6 +1607,63 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
             {state.voice.errorMessage ? (
               <Text style={styles.inlineError}>{state.voice.errorMessage}</Text>
             ) : null}
+            <View style={styles.drawerQuickActions}>
+              <Pressable
+                accessibilityLabel="Open calendar"
+                accessibilityRole="button"
+                onPress={() => {
+                  void openMobileCalendarPanel()
+                }}
+                style={[
+                  styles.drawerQuickActionButton,
+                  meetingPanelOpen ? styles.activeDrawerQuickActionButton : null,
+                ]}
+              >
+                <Text style={styles.drawerQuickActionIcon}>▣</Text>
+                <Text style={styles.drawerQuickActionText}>Calendar</Text>
+              </Pressable>
+              {meetingPanelOpen ? (
+                <Pressable
+                  accessibilityLabel="Close calendar"
+                  accessibilityRole="button"
+                  onPress={() => setMeetingPanelOpen(false)}
+                  style={styles.drawerQuickActionButton}
+                >
+                  <Text style={styles.drawerQuickActionIcon}>×</Text>
+                  <Text style={styles.drawerQuickActionText}>Close</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {meetingPanelOpen ? (
+              <MobileMeetingPanel
+                activeVoiceMeetingId={state.voice.connectedChannelId}
+                channels={state.channels}
+                feedback={meetingFeedback}
+                form={meetingForm}
+                localRemindersByMeetingId={localMeetingReminders}
+                meetings={meetings}
+                onCancelMeeting={(meeting) => {
+                  void cancelMobileMeeting(meeting)
+                }}
+                onCloseForm={closeMobileMeetingForm}
+                onCopyCalendarUrl={copyMeetingCalendarUrl}
+                onCopyJoinUrl={copyMeetingJoinUrl}
+                onEditMeeting={openMobileMeetingEditForm}
+                onFieldChange={setMobileMeetingFormField}
+                onJoinMeeting={(meeting) => {
+                  void joinMobileMeeting(meeting.id, meeting.title)
+                }}
+                onLeaveMeeting={leaveVoice}
+                onOpenCalendarUrl={openMeetingCalendarUrl}
+                onOpenJoinUrl={openMeetingJoinUrl}
+                onSaveForm={() => {
+                  void saveMobileMeetingForm()
+                }}
+                onSelectMeeting={openMobileMeetingDetail}
+                onStartCreate={startCreateMobileMeeting}
+                selectedMeeting={selectedMeeting}
+              />
+            ) : null}
             <WorkspaceNavigator
               onChannelPress={openMobileChannel}
               sections={workspaceSections}
@@ -1511,6 +1918,298 @@ function ServerManagementSheet({
       >
         <Text style={styles.primaryButtonText}>Remove current server</Text>
       </Pressable>
+    </View>
+  )
+}
+
+function MobileMeetingPanel({
+  activeVoiceMeetingId,
+  channels,
+  feedback,
+  form,
+  localRemindersByMeetingId,
+  meetings,
+  onCancelMeeting,
+  onCloseForm,
+  onCopyCalendarUrl,
+  onCopyJoinUrl,
+  onEditMeeting,
+  onFieldChange,
+  onJoinMeeting,
+  onLeaveMeeting,
+  onOpenCalendarUrl,
+  onOpenJoinUrl,
+  onSaveForm,
+  onSelectMeeting,
+  onStartCreate,
+  selectedMeeting,
+}: {
+  activeVoiceMeetingId: string | null
+  channels: MobileChannel[]
+  feedback: string | null
+  form: MobileMeetingForm | null
+  localRemindersByMeetingId: Record<string, { channel: 'in_app' | 'email'; offsetMinutes: number }>
+  meetings: Meeting[]
+  onCancelMeeting: (meeting: Meeting) => void
+  onCloseForm: () => void
+  onCopyCalendarUrl: (meeting: Meeting) => void
+  onCopyJoinUrl: (meeting: Meeting) => void
+  onEditMeeting: (meeting: Meeting) => void
+  onFieldChange: <Key extends keyof MobileMeetingForm>(
+    key: Key,
+    value: MobileMeetingForm[Key],
+  ) => void
+  onJoinMeeting: (meeting: Meeting) => void
+  onLeaveMeeting: () => void
+  onOpenCalendarUrl: (meeting: Meeting) => void
+  onOpenJoinUrl: (meeting: Meeting) => void
+  onSaveForm: () => void
+  onSelectMeeting: (meeting: Meeting) => void
+  onStartCreate: () => void
+  selectedMeeting: Meeting | null
+}) {
+  const scheduledMeetings = meetings.filter((meeting) => meeting.status === 'scheduled')
+
+  return (
+    <View style={styles.meetingPanel}>
+      <View style={styles.meetingPanelHeader}>
+        <View>
+          <Text style={styles.sheetTitle}>Calendar</Text>
+          <Text style={styles.subtle}>{scheduledMeetings.length} scheduled meetings</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onStartCreate}
+          style={styles.meetingPrimaryButton}
+        >
+          <Text style={styles.primaryButtonText}>New</Text>
+        </Pressable>
+      </View>
+      {feedback ? <Text style={styles.composerFeedback}>{feedback}</Text> : null}
+      {form ? (
+        <MobileMeetingFormView
+          form={form}
+          onClose={onCloseForm}
+          onFieldChange={onFieldChange}
+          onSave={onSaveForm}
+        />
+      ) : null}
+      <ScrollView nestedScrollEnabled style={styles.meetingPanelScroll}>
+        {scheduledMeetings.length === 0 ? (
+          <View style={styles.meetingEmptyState}>
+            <Text style={styles.meetingEmptyTitle}>No upcoming meetings</Text>
+            <Text style={styles.subtle}>Create one for this server or open a meeting invite.</Text>
+          </View>
+        ) : (
+          scheduledMeetings.map((meeting) => (
+            <Pressable
+              accessibilityLabel={`Open meeting ${meeting.title}`}
+              accessibilityRole="button"
+              key={meeting.id}
+              onPress={() => onSelectMeeting(meeting)}
+              style={[
+                styles.meetingListCard,
+                selectedMeeting?.id === meeting.id ? styles.selectedMeetingListCard : null,
+              ]}
+            >
+              <Text style={styles.meetingCardTime}>{formatMeetingDay(meeting.startsAt)}</Text>
+              <View style={styles.meetingCardBody}>
+                <Text numberOfLines={1} style={styles.meetingCardTitle}>
+                  {meeting.title}
+                </Text>
+                <Text style={styles.subtle}>{formatMeetingClock(meeting.startsAt, meeting.endsAt)}</Text>
+                <Text style={styles.meetingChannelLabel}>{meetingChannelName(meeting, channels)}</Text>
+              </View>
+            </Pressable>
+          ))
+        )}
+        {selectedMeeting ? (
+          <MobileMeetingDetail
+            active={activeVoiceMeetingId === selectedMeeting.id}
+            channels={channels}
+            localReminder={localRemindersByMeetingId[selectedMeeting.id]}
+            meeting={selectedMeeting}
+            onCancelMeeting={onCancelMeeting}
+            onCopyCalendarUrl={onCopyCalendarUrl}
+            onCopyJoinUrl={onCopyJoinUrl}
+            onEditMeeting={onEditMeeting}
+            onJoinMeeting={onJoinMeeting}
+            onLeaveMeeting={onLeaveMeeting}
+            onOpenCalendarUrl={onOpenCalendarUrl}
+            onOpenJoinUrl={onOpenJoinUrl}
+          />
+        ) : null}
+      </ScrollView>
+    </View>
+  )
+}
+
+function MobileMeetingFormView({
+  form,
+  onClose,
+  onFieldChange,
+  onSave,
+}: {
+  form: MobileMeetingForm
+  onClose: () => void
+  onFieldChange: <Key extends keyof MobileMeetingForm>(
+    key: Key,
+    value: MobileMeetingForm[Key],
+  ) => void
+  onSave: () => void
+}) {
+  return (
+    <View style={styles.meetingForm}>
+      <View style={styles.meetingFormHeader}>
+        <Text style={styles.meetingSectionTitle}>
+          {form.mode === 'edit' ? 'Edit meeting' : 'Create meeting'}
+        </Text>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.clearContextButton}>
+          <Text style={styles.headerActionText}>Close</Text>
+        </Pressable>
+      </View>
+      <TextInput
+        accessibilityLabel="Meeting title"
+        onChangeText={(value) => onFieldChange('title', value)}
+        placeholder="Meeting title"
+        placeholderTextColor="#7f877d"
+        style={styles.meetingInput}
+        value={form.title}
+      />
+      <View style={styles.meetingFormGrid}>
+        <TextInput
+          accessibilityLabel="Meeting start time"
+          onChangeText={(value) => onFieldChange('startsAt', value)}
+          placeholder="YYYY-MM-DDTHH:mm"
+          placeholderTextColor="#7f877d"
+          style={styles.meetingInput}
+          value={form.startsAt}
+        />
+        <TextInput
+          accessibilityLabel="Meeting end time"
+          onChangeText={(value) => onFieldChange('endsAt', value)}
+          placeholder="YYYY-MM-DDTHH:mm"
+          placeholderTextColor="#7f877d"
+          style={styles.meetingInput}
+          value={form.endsAt}
+        />
+      </View>
+      <View style={styles.meetingReminderRow}>
+        <View style={styles.meetingReminderCopy}>
+          <Text style={styles.meetingSectionTitle}>Reminder</Text>
+          <Text style={styles.subtle}>Local in-app reminder UI only until provider delivery is configured.</Text>
+        </View>
+        <TextInput
+          accessibilityLabel="Reminder minutes before meeting"
+          inputMode="numeric"
+          onChangeText={(value) =>
+            onFieldChange('reminderOffsetMinutes', Math.max(0, Number(value) || 0))
+          }
+          style={styles.meetingReminderInput}
+          value={String(form.reminderOffsetMinutes)}
+        />
+      </View>
+      <View style={styles.meetingFormActions}>
+        <Pressable accessibilityRole="button" onPress={onSave} style={styles.meetingPrimaryButton}>
+          <Text style={styles.primaryButtonText}>Save</Text>
+        </Pressable>
+      </View>
+    </View>
+  )
+}
+
+function MobileMeetingDetail({
+  active,
+  channels,
+  localReminder,
+  meeting,
+  onCancelMeeting,
+  onCopyCalendarUrl,
+  onCopyJoinUrl,
+  onEditMeeting,
+  onJoinMeeting,
+  onLeaveMeeting,
+  onOpenCalendarUrl,
+  onOpenJoinUrl,
+}: {
+  active: boolean
+  channels: MobileChannel[]
+  localReminder?: { channel: 'in_app' | 'email'; offsetMinutes: number }
+  meeting: Meeting
+  onCancelMeeting: (meeting: Meeting) => void
+  onCopyCalendarUrl: (meeting: Meeting) => void
+  onCopyJoinUrl: (meeting: Meeting) => void
+  onEditMeeting: (meeting: Meeting) => void
+  onJoinMeeting: (meeting: Meeting) => void
+  onLeaveMeeting: () => void
+  onOpenCalendarUrl: (meeting: Meeting) => void
+  onOpenJoinUrl: (meeting: Meeting) => void
+}) {
+  return (
+    <View style={styles.meetingDetailCard}>
+      <View style={styles.meetingDetailHeader}>
+        <View style={styles.meetingDetailTitleBlock}>
+          <Text style={styles.meetingDetailTitle}>{meeting.title}</Text>
+          <Text style={styles.subtle}>
+            {formatMeetingDay(meeting.startsAt)} · {formatMeetingClock(meeting.startsAt, meeting.endsAt)}
+          </Text>
+        </View>
+        <Text style={[styles.meetingStatusPill, active ? styles.activeMeetingStatusPill : null]}>
+          {active ? 'Joined' : meeting.status}
+        </Text>
+      </View>
+      <Text style={styles.meetingChannelLabel}>{meetingChannelName(meeting, channels)}</Text>
+      <View style={styles.meetingLinkBlock}>
+        <Text style={styles.meetingSectionTitle}>Join URL</Text>
+        <Text numberOfLines={2} style={styles.meetingCodeText}>{meeting.joinUrl}</Text>
+        <View style={styles.meetingInlineActions}>
+          <Pressable accessibilityRole="button" onPress={() => onOpenJoinUrl(meeting)} style={styles.meetingSecondaryButton}>
+            <Text style={styles.headerActionText}>Open</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => onCopyJoinUrl(meeting)} style={styles.meetingSecondaryButton}>
+            <Text style={styles.headerActionText}>Copy</Text>
+          </Pressable>
+        </View>
+      </View>
+      <View style={styles.meetingLinkBlock}>
+        <Text style={styles.meetingSectionTitle}>Calendar invite</Text>
+        <Text style={styles.subtle}>ICS download for external calendar apps; provider push delivery is not claimed here.</Text>
+        <View style={styles.meetingInlineActions}>
+          <Pressable accessibilityRole="button" onPress={() => onOpenCalendarUrl(meeting)} style={styles.meetingSecondaryButton}>
+            <Text style={styles.headerActionText}>Open .ics</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => onCopyCalendarUrl(meeting)} style={styles.meetingSecondaryButton}>
+            <Text style={styles.headerActionText}>Copy .ics</Text>
+          </Pressable>
+        </View>
+      </View>
+      <View style={styles.meetingReminderSummary}>
+        <Text style={styles.meetingSectionTitle}>Reminder</Text>
+        <Text style={styles.subtle}>
+          {localReminder
+            ? `${localReminder.offsetMinutes} minutes before · ${localReminder.channel}`
+            : meeting.reminders[0]
+              ? `${meeting.reminders[0].offsetMinutes} minutes before · ${meeting.reminders[0].channel}`
+              : 'No reminder configured'}
+        </Text>
+      </View>
+      <View style={styles.meetingDetailActions}>
+        {active ? (
+          <Pressable accessibilityRole="button" onPress={onLeaveMeeting} style={styles.meetingDangerButton}>
+            <Text style={styles.primaryButtonText}>Leave</Text>
+          </Pressable>
+        ) : (
+          <Pressable accessibilityRole="button" onPress={() => onJoinMeeting(meeting)} style={styles.meetingPrimaryButton}>
+            <Text style={styles.primaryButtonText}>Join</Text>
+          </Pressable>
+        )}
+        <Pressable accessibilityRole="button" onPress={() => onEditMeeting(meeting)} style={styles.meetingSecondaryButton}>
+          <Text style={styles.headerActionText}>Edit</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => onCancelMeeting(meeting)} style={styles.meetingDangerButton}>
+          <Text style={styles.primaryButtonText}>Cancel</Text>
+        </Pressable>
+      </View>
     </View>
   )
 }
@@ -2397,6 +3096,219 @@ function pendingAttachmentStatusLabel(attachment: MobilePendingAttachment) {
   }
 }
 
+function seedMobileMeetings(email: string): Meeting[] {
+  const startsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  const endsAt = new Date(Date.now() + 90 * 60 * 1000).toISOString()
+
+  return [
+    {
+      id: 'local-alpha-meeting',
+      organizationId: DEFAULT_MOBILE_ORGANIZATION_ID,
+      spaceId: DEFAULT_MOBILE_SPACE_ID,
+      channelId: 'general',
+      createdByUserId: 'local-alpha-owner',
+      title: 'OpenCord Local Alpha Standup',
+      description: 'Mobile calendar, reminder, and meeting join UX smoke fixture.',
+      status: 'scheduled',
+      startsAt,
+      endsAt,
+      timezone: resolvedTimeZone(),
+      joinSlug: 'mtg-local-alpha-standup',
+      joinUrl: 'https://chat.example.com/join/mtg-local-alpha-standup',
+      cancelledAt: null,
+      attendees: [
+        {
+          id: 'local-alpha-attendee',
+          meetingId: 'local-alpha-meeting',
+          userId: null,
+          email,
+          displayName: email.split('@')[0] || 'Mobile user',
+          role: 'required',
+          responseStatus: 'needs_action',
+        },
+      ],
+      reminders: [
+        {
+          id: 'local-alpha-reminder',
+          meetingId: 'local-alpha-meeting',
+          recipientUserId: null,
+          recipientEmail: email,
+          channel: 'in_app',
+          offsetMinutes: 10,
+          scheduledFor: new Date(Date.now() + 50 * 60 * 1000).toISOString(),
+          status: 'pending',
+        },
+      ],
+    },
+  ]
+}
+
+function localMobileMeetingFromForm(
+  form: MobileMeetingForm,
+  {
+    email,
+    endsAt,
+    serverUrl,
+    startsAt,
+    title,
+  }: {
+    email?: string
+    endsAt: string
+    serverUrl: string
+    startsAt: string
+    title: string
+  },
+): Meeting {
+  const id = form.meetingId ?? `local-meeting-${Date.now()}`
+  const joinSlug = `mtg-${slugForMeetingTitle(title)}-${id.replace(/[^a-z0-9]+/gi, '')}`
+
+  return {
+    id,
+    organizationId: form.organizationId ?? DEFAULT_MOBILE_ORGANIZATION_ID,
+    spaceId: form.spaceId ?? DEFAULT_MOBILE_SPACE_ID,
+    channelId: form.channelId ?? null,
+    createdByUserId: 'mobile-local',
+    title,
+    description: null,
+    status: 'scheduled',
+    startsAt,
+    endsAt,
+    timezone: resolvedTimeZone(),
+    joinSlug,
+    joinUrl: `${serverUrl.replace(/\/+$/, '')}/join/${joinSlug}`,
+    cancelledAt: null,
+    attendees: email
+      ? [
+          {
+            id: `${id}-attendee`,
+            meetingId: id,
+            userId: null,
+            email,
+            displayName: email.split('@')[0] || email,
+            role: 'required',
+            responseStatus: 'needs_action',
+          },
+        ]
+      : [],
+    reminders: mobileMeetingRemindersForForm(form, email).map((reminder, index) => ({
+      id: `${id}-reminder-${index}`,
+      meetingId: id,
+      recipientUserId: null,
+      recipientEmail: reminder.recipientEmail ?? null,
+      channel: reminder.channel,
+      offsetMinutes: reminder.offsetMinutes,
+      scheduledFor: new Date(
+        new Date(startsAt).getTime() - reminder.offsetMinutes * 60_000,
+      ).toISOString(),
+      status: 'pending',
+    })),
+  }
+}
+
+function mobileMeetingRemindersForForm(form: MobileMeetingForm, email?: string | null) {
+  if (form.reminderOffsetMinutes <= 0) {
+    return []
+  }
+
+  return [
+    {
+      recipientEmail: email ?? undefined,
+      channel: form.reminderChannel,
+      offsetMinutes: form.reminderOffsetMinutes,
+    },
+  ]
+}
+
+function meetingOrganizationIdFromChannels(channels: Array<{ organizationId?: string }>) {
+  return channels.find((channel) => channel.organizationId)?.organizationId ?? null
+}
+
+function meetingOrganizationIdFromMobileChannels(channels: MobileChannel[]) {
+  return meetingOrganizationIdFromChannels(channels)
+}
+
+function defaultMeetingLocalDateTime() {
+  const nextHour = new Date()
+  nextHour.setMinutes(0, 0, 0)
+  nextHour.setHours(nextHour.getHours() + 1)
+  return dateToLocalDateTimeInput(nextHour)
+}
+
+function addMinutesToLocalDateTime(value: string, minutes: number) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return dateToLocalDateTimeInput(new Date(date.getTime() + minutes * 60_000))
+}
+
+function dateToLocalDateTimeInput(date: Date) {
+  const offsetMs = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
+function localDateTimeToIso(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function resolvedTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
+function isServerBackedId(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+}
+
+function formatMeetingDay(value: string) {
+  const date = parseMeetingDate(value)
+  if (!date) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+  }).format(date)
+}
+
+function formatMeetingClock(startsAt: string, endsAt: string) {
+  const start = parseMeetingDate(startsAt)
+  const end = parseMeetingDate(endsAt)
+  if (!start || !end) {
+    return `${startsAt} - ${endsAt}`
+  }
+
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `${formatter.format(start)} - ${formatter.format(end)}`
+}
+
+function meetingChannelName(meeting: Meeting, channels: MobileChannel[]) {
+  const channel = channels.find((candidate) => candidate.id === meeting.channelId)
+  if (!channel) {
+    return 'Workspace'
+  }
+
+  return `${channel.kind === 'voice' ? 'Voice' : '#'} ${channel.name}`
+}
+
+function parseMeetingDate(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function slugForMeetingTitle(title: string) {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '') || 'meeting'
+}
+
 async function ensureMobileWorkspaceChannels(
   client: ReturnType<typeof createOpenCordApiClient>,
   email: string,
@@ -2622,6 +3534,40 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 6,
   },
+  drawerQuickActions: {
+    borderBottomColor: '#242826',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  drawerQuickActionButton: {
+    alignItems: 'center',
+    backgroundColor: '#232428',
+    borderColor: '#232428',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    justifyContent: 'center',
+    minHeight: 36,
+    paddingHorizontal: 10,
+  },
+  activeDrawerQuickActionButton: {
+    backgroundColor: '#1d2b28',
+    borderColor: '#28796d',
+  },
+  drawerQuickActionIcon: {
+    color: '#86e0bb',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  drawerQuickActionText: {
+    color: '#f2f3f5',
+    fontSize: 12,
+    fontWeight: '900',
+  },
   iconButton: {
     alignItems: 'center',
     backgroundColor: '#2b2b2b',
@@ -2760,6 +3706,223 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     justifyContent: 'center',
     minHeight: 40,
+  },
+  meetingPanel: {
+    backgroundColor: '#171819',
+    borderBottomColor: '#2b2f2d',
+    borderBottomWidth: 1,
+    maxHeight: 520,
+    padding: 12,
+  },
+  meetingPanelHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  meetingPanelScroll: {
+    maxHeight: 420,
+  },
+  meetingEmptyState: {
+    backgroundColor: '#202124',
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
+    minHeight: 82,
+    padding: 12,
+  },
+  meetingEmptyTitle: {
+    color: '#f2f3f5',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  meetingListCard: {
+    alignItems: 'center',
+    backgroundColor: '#202124',
+    borderColor: '#2f3431',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+    minHeight: 72,
+    padding: 10,
+  },
+  selectedMeetingListCard: {
+    backgroundColor: '#202a27',
+    borderColor: '#28796d',
+  },
+  meetingCardTime: {
+    color: '#86e0bb',
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    width: 56,
+  },
+  meetingCardBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  meetingCardTitle: {
+    color: '#f2f3f5',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  meetingChannelLabel: {
+    color: '#cfd6cc',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  meetingDetailCard: {
+    backgroundColor: '#202124',
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 10,
+    marginTop: 4,
+    padding: 12,
+  },
+  meetingDetailHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  meetingDetailTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  meetingDetailTitle: {
+    color: '#f2f3f5',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  meetingStatusPill: {
+    backgroundColor: '#35383d',
+    borderRadius: 8,
+    color: '#dbdee1',
+    fontSize: 11,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    textTransform: 'uppercase',
+  },
+  activeMeetingStatusPill: {
+    backgroundColor: '#28796d',
+    color: '#ffffff',
+  },
+  meetingLinkBlock: {
+    backgroundColor: '#18191b',
+    borderRadius: 8,
+    gap: 6,
+    padding: 10,
+  },
+  meetingCodeText: {
+    color: '#d7dbde',
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  meetingInlineActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  meetingDetailActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  meetingPrimaryButton: {
+    alignItems: 'center',
+    backgroundColor: '#28796d',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 34,
+    minWidth: 64,
+    paddingHorizontal: 12,
+  },
+  meetingSecondaryButton: {
+    alignItems: 'center',
+    backgroundColor: '#35383d',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 34,
+    minWidth: 64,
+    paddingHorizontal: 12,
+  },
+  meetingDangerButton: {
+    alignItems: 'center',
+    backgroundColor: '#623238',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 34,
+    minWidth: 64,
+    paddingHorizontal: 12,
+  },
+  meetingForm: {
+    backgroundColor: '#202124',
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+    marginBottom: 10,
+    padding: 10,
+  },
+  meetingFormHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  meetingSectionTitle: {
+    color: '#f2f3f5',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  meetingInput: {
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    color: '#f5f6f3',
+    minHeight: 40,
+    paddingHorizontal: 10,
+  },
+  meetingFormGrid: {
+    gap: 8,
+  },
+  meetingReminderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  meetingReminderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  meetingReminderInput: {
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    color: '#f5f6f3',
+    minHeight: 40,
+    paddingHorizontal: 10,
+    textAlign: 'center',
+    width: 72,
+  },
+  meetingReminderSummary: {
+    backgroundColor: '#18191b',
+    borderRadius: 8,
+    gap: 4,
+    padding: 10,
+  },
+  meetingFormActions: {
+    alignItems: 'flex-end',
   },
   errorText: {
     color: '#ffb1a8',
