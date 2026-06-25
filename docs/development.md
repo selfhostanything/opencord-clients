@@ -117,7 +117,7 @@ For Android emulator smoke on this machine:
 ```bash
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-emulator -list-avds
+emulator -list-avds   # pick one of your Android 15 AVDs
 emulator -avd <your-avd-name> -no-snapshot-save -no-audio -no-boot-anim
 # Headless CI/local smoke can also add: -no-window
 adb wait-for-device
